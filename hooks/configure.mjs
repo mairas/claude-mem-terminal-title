@@ -24,8 +24,10 @@ const settingsPath = join(
 const bun = process.execPath;
 const script = join(import.meta.dir, "stop.mjs");
 // The trailing marker arg (ignored by stop.mjs) makes ownership detection
-// independent of the install directory's name.
-const command = `"${bun}" "${script}" --installed-by=${MARKER}`;
+// independent of the install directory's name. Match on the full arg, not the
+// bare name, so an unrelated hook that merely mentions the name isn't claimed.
+const MARKER_ARG = `--installed-by=${MARKER}`;
+const command = `"${bun}" "${script}" ${MARKER_ARG}`;
 
 if (action !== "install" && action !== "uninstall") {
   console.error("usage: configure.mjs install|uninstall");
@@ -39,7 +41,7 @@ const settings = existsSync(settingsPath)
 configureSettings(settings, {
   action,
   command,
-  marker: MARKER,
+  marker: MARKER_ARG,
   disableEnv: DISABLE_TITLE_ENV,
   managedEnv: MANAGED_ENV,
 });

@@ -1,17 +1,17 @@
 import { test, expect } from "bun:test";
 import { configureSettings } from "../hooks/configure-settings.mjs";
 
-const MARKER = "claude-mem-terminal-title";
+const MARKER_ARG = "--installed-by=claude-mem-terminal-title";
 const DISABLE = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE";
 const MANAGED = "CMTT_MANAGED_DISABLE_TITLE";
 
 const cmd = (path = "/tools/cmtt/hooks/stop.mjs") =>
-  `"/bun" "${path}" --installed-by=${MARKER}`;
+  `"/bun" "${path}" ${MARKER_ARG}`;
 
 const opts = (action, command = cmd()) => ({
   action,
   command,
-  marker: MARKER,
+  marker: MARKER_ARG,
   disableEnv: DISABLE,
   managedEnv: MANAGED,
 });
@@ -64,6 +64,26 @@ test("uninstall leaves a user-set disable env var untouched", () => {
   s = configureSettings(s, opts("uninstall"));
   expect(s.env[DISABLE]).toBe("1"); // still there
   expect(s.env.FOO).toBe("bar");
+});
+
+test("a foreign hook that merely mentions the tool name is not claimed", () => {
+  // Matching is on the full --installed-by arg, not the bare name, so an
+  // unrelated hook whose command contains the name (e.g. a fork's path) survives.
+  const foreign = {
+    hooks: [{ type: "command", command: '"/bun" "/home/u/claude-mem-terminal-title-fork/x.mjs"' }],
+  };
+  let s = configureSettings({ hooks: { Stop: [foreign] } }, opts("install"));
+  expect(s.hooks.Stop).toContainEqual(foreign);
+  s = configureSettings(s, opts("uninstall"));
+  expect(s.hooks.Stop).toEqual([foreign]);
+});
+
+test("a pre-marker install's disable env is left in place on uninstall (conservative)", () => {
+  // Migration tail: a value set without the managed marker is never auto-removed,
+  // so the tool never deletes a value it can't prove it owns.
+  let s = { env: { [DISABLE]: "1" } };
+  s = configureSettings(s, opts("uninstall"));
+  expect(s.env[DISABLE]).toBe("1");
 });
 
 test("unknown action throws", () => {
