@@ -1,0 +1,6 @@
+.DS_Store
+*.log
+
+# Per-session hook state, if written under the repo during development
+state/
+*.state
