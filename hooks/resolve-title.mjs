@@ -6,13 +6,14 @@ const DEFAULT_LABEL = "Claude Code";
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);
 
-// Replace C0 control chars and DEL with spaces, then collapse runs. Control
-// chars must never reach the OSC sequence — a stray ESC or BEL corrupts it.
+// Replace C0 controls, DEL, and C1 controls (0x80-0x9f) with spaces, then
+// collapse runs. Control chars must never reach the OSC sequence — a stray ESC
+// or BEL corrupts it, and C1 ST (0x9c) can terminate it early on 8-bit terminals.
 function clean(s) {
   let out = "";
   for (const ch of s ?? "") {
     const n = ch.codePointAt(0);
-    out += n < 0x20 || n === 0x7f ? " " : ch;
+    out += n < 0x20 || (n >= 0x7f && n <= 0x9f) ? " " : ch;
   }
   return out.replace(/ +/g, " ").trim();
 }
@@ -20,8 +21,10 @@ function clean(s) {
 export function formatTitle(project, request) {
   const p = clean(project);
   const r = clean(request);
-  let title = p ? `[${p}] ${r}` : r;
-  if (title.length > MAX_LEN) title = title.slice(0, MAX_LEN - 1).trimEnd() + "…";
+  const title = p ? `[${p}] ${r}` : r;
+  // Truncate by code point so a surrogate pair (emoji) is never split.
+  const cp = [...title];
+  if (cp.length > MAX_LEN) return cp.slice(0, MAX_LEN - 1).join("").trimEnd() + "…";
   return title;
 }
 
@@ -64,7 +67,7 @@ export function latestRequestForSession(db, project, sessionId) {
            FROM user_prompts up
            JOIN sdk_sessions sk ON sk.content_session_id = up.content_session_id
            WHERE sk.project = $project AND up.created_at_epoch <= s.created_at_epoch
-           ORDER BY up.created_at_epoch DESC
+           ORDER BY up.created_at_epoch DESC, (up.content_session_id = $session) DESC, up.rowid DESC
            LIMIT 1
          ) = $session
        ORDER BY s.created_at_epoch DESC
