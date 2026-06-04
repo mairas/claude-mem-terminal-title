@@ -17,6 +17,13 @@ fi
 readonly PROJECT_ROOT=$(pwd)
 
 ################################################################################
+# Helper Functions
+
+function _bun {
+  command -v bun || echo "$HOME/.bun/bin/bun"
+}
+
+################################################################################
 # Setup Commands
 
 function deps {
@@ -43,6 +50,27 @@ function deps {
     ok=1
   fi
   return $ok
+}
+
+function install {
+  #@ Install the Stop hook into Claude Code's settings.json
+  #@ Category: Setup
+  "$(_bun)" "$PROJECT_ROOT/hooks/configure.mjs" install
+}
+
+function uninstall {
+  #@ Remove the Stop hook from Claude Code's settings.json
+  #@ Category: Setup
+  "$(_bun)" "$PROJECT_ROOT/hooks/configure.mjs" uninstall
+}
+
+################################################################################
+# Quality Commands
+
+function test {
+  #@ Run the test suite
+  #@ Category: Quality
+  "$(_bun)" test
 }
 
 ################################################################################

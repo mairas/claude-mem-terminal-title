@@ -21,37 +21,45 @@ session and generates a rolling, Haiku-summarised task label (the `request` fiel
 in its `session_summaries` table), updated roughly every turn. This tool reuses
 that label as the window title — no extra model calls.
 
-Two hooks do the work:
-
-- `UserPromptSubmit` records this window's session id and the time of its latest
-  prompt to a small state file.
-- `Stop` reads the current task label for the window's project from claude-mem's
-  SQLite database and emits an `OSC 2` terminal sequence (via the hook
-  `terminalSequence` field, Claude Code ≥ 2.1.141) to set the title.
+A `Stop` hook reads the current task label for the window's project from
+claude-mem's SQLite database and emits an `OSC 0` terminal sequence (via the hook's
+top-level `terminalSequence` output field, Claude Code ≥ 2.1.141) to set the title.
 
 Title format: `[project] task label`.
 
-### Telling same-repo windows apart
+Claude Code animates the terminal title itself, which would overwrite the hook's
+title. The installer sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in `settings.json`
+to hand title control to the hook. This disables Claude Code's own (animated)
+title, including its auto-generated session title.
 
-claude-mem keys generated rows by an internal `memory_session_id`, and the mapping
-back to a Claude Code session lags, so "latest label for this project" alone can't
-distinguish two windows on the same repo. This tool correlates by time: each window
-claims the project label generated after its own most recent turn.
+### Telling same-repo windows apart (Milestone 2, in progress)
 
-That heuristic can mis-assign if two same-repo windows finish a turn within a few
-seconds of each other. The exact fix needs claude-mem to stamp the originating
-session id onto each generated row — see [`docs/upstream-issue.md`](docs/upstream-issue.md).
+Current behaviour picks the latest label for the window's project, so two windows
+on the same repo show the same title. claude-mem keys generated rows by an internal
+`memory_session_id` whose mapping back to a Claude Code session lags, so the project
+is the only reliable key today.
+
+Milestone 2 correlates by time: each window claims the project label generated after
+its own most recent turn. That heuristic can still mis-assign if two same-repo
+windows finish a turn within a few seconds of each other. The exact fix needs
+claude-mem to stamp the originating session id onto each generated row — see
+[`docs/upstream-issue.md`](docs/upstream-issue.md).
 
 ## Requirements
 
 - Claude Code ≥ 2.1.141 (for hook `terminalSequence`)
 - claude-mem installed and generating memory
 - [bun](https://bun.sh) (used by claude-mem already; provides in-process SQLite)
-- A terminal that honours `OSC 0/2` window-title sequences
+- A terminal that honours `OSC 0` window-title sequences
 
 ## Install
 
-Coming with Milestone 1. Run `./run help` to see available commands.
+```sh
+./run install     # adds the Stop hook + CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 to settings.json
+```
+
+Restart Claude Code (or start a new session) so the env var takes effect. Remove with
+`./run uninstall`. Run `./run help` for all commands.
 
 ## License
 

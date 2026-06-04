@@ -1,0 +1,8 @@
+{
+  "name": "claude-mem-terminal-title",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Set each Claude Code window's terminal title from claude-mem's current task label"
+}
