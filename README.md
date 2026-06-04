@@ -65,16 +65,13 @@ do.
 
 ## Configuration
 
-Optional. Without a config file the default format applies. To customise, create:
+Optional. Without a config file the default format applies. To customise, create
+`~/.config/claude-mem-terminal-title.yaml` (honours `$XDG_CONFIG_HOME`; override the
+whole path with `CMTT_CONFIG`):
 
-```
-~/.config/claude-mem-terminal-title/config.json
-```
-
-(honours `$XDG_CONFIG_HOME`; override the whole path with `CMTT_CONFIG`)
-
-```json
-{ "format": "{emoji} [{project}] {label}" }
+```yaml
+# Title template. Tokens: {emoji} {project} {label}
+format: "{emoji} [{project}] {label}"
 ```
 
 | Token | Meaning |
@@ -83,8 +80,8 @@ Optional. Without a config file the default format applies. To customise, create
 | `{project}` | Project name (git root or cwd basename) |
 | `{label}` | Current task label from claude-mem, or `Claude Code` as fallback |
 
-Unknown `{tokens}` are left as-is. A missing or malformed config file falls back to
-the default format silently — the hook never disrupts the session. Some format
+Unknown `{tokens}` are left as-is. A missing, empty, or malformed config falls back
+to the default format silently — the hook never disrupts the session. Some format
 ideas: `{emoji} {project}: {label}`, `{project} — {label}` (no emoji),
 `{emoji} {label}`.
 

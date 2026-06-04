@@ -16,26 +16,27 @@ process.on("unhandledRejection", () => process.exit(0));
 const DB_PATH =
   process.env.CMTT_DB || join(homedir(), ".claude-mem", "claude-mem.db");
 
-// XDG-style config home, overridable wholesale with CMTT_CONFIG (a full file
+// XDG-style config path, overridable wholesale with CMTT_CONFIG (a full file
 // path) for testing or non-standard layouts.
 const CONFIG_PATH =
   process.env.CMTT_CONFIG ||
   join(
     process.env.XDG_CONFIG_HOME || join(homedir(), ".config"),
-    "claude-mem-terminal-title",
-    "config.json",
+    "claude-mem-terminal-title.yaml",
   );
 
 // Returns the user's `format` template, or undefined to let resolveTitle use its
-// default. A missing or malformed file is not an error — like everything else in
-// this hook, it degrades silently to the default. An empty or whitespace-only
+// default. The config is YAML (parsed via Bun's built-in Bun.YAML); a missing,
+// empty, comment-only, or malformed file is not an error — like everything else
+// in this hook, it degrades silently to the default. An empty or whitespace-only
 // format is treated as absent so it can't render a blank title (which the emit
 // guard would drop, leaving the window's previous title stale).
 function loadFormat() {
   try {
     if (!existsSync(CONFIG_PATH)) return undefined;
-    const cfg = JSON.parse(readFileSync(CONFIG_PATH, "utf8") || "{}");
-    return typeof cfg.format === "string" && cfg.format.trim() ? cfg.format : undefined;
+    const cfg = Bun.YAML.parse(readFileSync(CONFIG_PATH, "utf8")) ?? {};
+    const format = cfg?.format;
+    return typeof format === "string" && format.trim() ? format : undefined;
   } catch {
     return undefined;
   }
