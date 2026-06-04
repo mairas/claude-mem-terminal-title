@@ -50,9 +50,13 @@ prompt while the first window's turn is still being summarised, the summary can 
 attributed to the wrong window — the first window's title goes stale and the second
 shows work it didn't do. The prompt timeline alone can't disambiguate two windows
 with overlapping open turns. The exact fix needs claude-mem to stamp the originating
-session id onto each generated row — see
-[`docs/upstream-issue.md`](docs/upstream-issue.md). Until then, the titles are
-reliable for windows whose turns don't overlap and best-effort when they do.
+session id onto each generated row, which shipped upstream in
+[claude-mem #2770](https://github.com/thedotmack/claude-mem/pull/2770). Once a
+released claude-mem carries it, this tool can correlate on that id directly instead
+of guessing by time — tracked in
+[#5](https://github.com/mairas/claude-mem-terminal-title/issues/5). Until then, the
+titles are reliable for windows whose turns don't overlap and best-effort when they
+do.
 
 ## Requirements
 
