@@ -22,7 +22,9 @@ function fixtureDb(dir) {
 async function runStop(stdin, env) {
   const proc = Bun.spawn([process.execPath, STOP], {
     stdin: Buffer.from(stdin),
-    env: { ...process.env, ...env },
+    // Default to a nonexistent config so tests don't pick up the dev machine's
+    // real ~/.config file; callers override CMTT_CONFIG when testing config.
+    env: { ...process.env, CMTT_CONFIG: "/nonexistent/cmtt/config.yaml", ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -71,8 +73,8 @@ test("a config file's format template controls the title", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
   try {
     const dbPath = fixtureDb(dir);
-    const cfg = join(dir, "config.json");
-    writeFileSync(cfg, JSON.stringify({ format: "{project} » {label}" }));
+    const cfg = join(dir, "config.yaml");
+    writeFileSync(cfg, '# my format\nformat: "{project} » {label}"\n');
     const { out, code } = await runStop(
       JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
       { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
@@ -88,14 +90,14 @@ test("a malformed config file falls back to the default format", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
   try {
     const dbPath = fixtureDb(dir);
-    const cfg = join(dir, "config.json");
-    writeFileSync(cfg, "{ not valid json");
+    const cfg = join(dir, "config.yaml");
+    writeFileSync(cfg, "format: [unterminated");
     const { out, code } = await runStop(
       JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
       { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
     );
     expect(code).toBe(0);
-    // Default format still produces the label, prefixed by the window emoji.
+    // Malformed config falls back to the default format.
     expect(JSON.parse(out).terminalSequence).toContain("[proj] do a thing");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -106,8 +108,8 @@ test("a non-string format key is ignored (default format)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
   try {
     const dbPath = fixtureDb(dir);
-    const cfg = join(dir, "config.json");
-    writeFileSync(cfg, JSON.stringify({ format: 42 }));
+    const cfg = join(dir, "config.yaml");
+    writeFileSync(cfg, "format: 42\n");
     const { out, code } = await runStop(
       JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
       { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
@@ -124,10 +126,10 @@ test("config resolves via the default XDG path when CMTT_CONFIG is unset", async
   try {
     const dbPath = fixtureDb(dir);
     const xdg = join(dir, "xdg");
-    mkdirSync(join(xdg, "claude-mem-terminal-title"), { recursive: true });
+    mkdirSync(xdg, { recursive: true });
     writeFileSync(
-      join(xdg, "claude-mem-terminal-title", "config.json"),
-      JSON.stringify({ format: "{project} :: {label}" }),
+      join(xdg, "claude-mem-terminal-title.yaml"),
+      'format: "{project} :: {label}"\n',
     );
     const { out, code } = await runStop(
       JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
@@ -144,8 +146,8 @@ test("config with no format key falls back to the default format", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
   try {
     const dbPath = fixtureDb(dir);
-    const cfg = join(dir, "config.json");
-    writeFileSync(cfg, JSON.stringify({ other: "x" }));
+    const cfg = join(dir, "config.yaml");
+    writeFileSync(cfg, "other: x\n");
     const { out, code } = await runStop(
       JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
       { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
@@ -157,12 +159,12 @@ test("config with no format key falls back to the default format", async () => {
   }
 });
 
-test("a top-level null config falls back to the default format", async () => {
+test("a comment-only config (parses to null) falls back to the default format", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
   try {
     const dbPath = fixtureDb(dir);
-    const cfg = join(dir, "config.json");
-    writeFileSync(cfg, "null");
+    const cfg = join(dir, "config.yaml");
+    writeFileSync(cfg, "# just a comment, no format\n");
     const { out, code } = await runStop(
       JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
       { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
@@ -178,8 +180,8 @@ test("an empty/whitespace format is ignored, never emitting a blank title", asyn
   const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
   try {
     const dbPath = fixtureDb(dir);
-    const cfg = join(dir, "config.json");
-    writeFileSync(cfg, JSON.stringify({ format: "   " }));
+    const cfg = join(dir, "config.yaml");
+    writeFileSync(cfg, 'format: "   "\n');
     const { out, code } = await runStop(
       JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
       { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
