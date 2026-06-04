@@ -22,7 +22,9 @@ function fixtureDb(dir) {
 async function runStop(stdin, env) {
   const proc = Bun.spawn([process.execPath, STOP], {
     stdin: Buffer.from(stdin),
-    env: { ...process.env, ...env },
+    // Default to a nonexistent config so tests don't pick up the dev machine's
+    // real ~/.config file; callers override CMTT_CONFIG when testing config.
+    env: { ...process.env, CMTT_CONFIG: "/nonexistent/cmtt/config.yaml", ...env },
     stdout: "pipe",
     stderr: "pipe",
   });

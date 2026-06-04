@@ -22,17 +22,12 @@ A `Stop` hook reads the current task label for the window's project from
 claude-mem's SQLite database and emits an `OSC 0` terminal sequence (via the hook's
 top-level `terminalSequence` output field, Claude Code ≥ 2.1.141) to set the title.
 
-Default title format: `{emoji} [{project}] {label}`, where `{label}` is the
-current task. When the window has no task label yet (a fresh window, or a project
-with no claude-mem history), `{label}` falls back to `Claude Code` so the title
-always at least names the project. The format is configurable — see
-[Configuration](#configuration).
-
-The leading emoji is unique-ish per window and stays fixed for that window's whole
-life, so you can recognise a window at a glance instead of reading the text. It's
-derived from the session id, so two windows usually differ but aren't guaranteed
-to (true uniqueness would need shared state). Drop the `{emoji}` token from your
-format to turn it off.
+Default title format: `[{project}] {label}`, where `{label}` is the current task.
+When the window has no task label yet (a fresh window, or a project with no
+claude-mem history), `{label}` falls back to `Claude Code` so the title always at
+least names the project. The format is configurable — see
+[Configuration](#configuration). Want a leading emoji to spot the window at a
+glance? Put one in the template yourself, e.g. `🦊 [{project}] {label}`.
 
 Claude Code animates the terminal title itself, which would overwrite the hook's
 title. The installer sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in `settings.json`
@@ -70,20 +65,19 @@ Optional. Without a config file the default format applies. To customise, create
 whole path with `CMTT_CONFIG`):
 
 ```yaml
-# Title template. Tokens: {emoji} {project} {label}
-format: "{emoji} [{project}] {label}"
+# Title template. Tokens: {project} {label}. Add a literal emoji if you like.
+format: "🦊 [{project}] {label}"
 ```
 
 | Token | Meaning |
 |-------|---------|
-| `{emoji}` | The window's fixed emoji (empty until the session is registered) |
 | `{project}` | Project name (git root or cwd basename) |
 | `{label}` | Current task label from claude-mem, or `Claude Code` as fallback |
 
-Unknown `{tokens}` are left as-is. A missing, empty, or malformed config falls back
-to the default format silently — the hook never disrupts the session. Some format
-ideas: `{emoji} {project}: {label}`, `{project} — {label}` (no emoji),
-`{emoji} {label}`.
+Unknown `{tokens}` are left as-is. Any other characters — including a leading emoji —
+are kept verbatim, so put one in the template if you want it. A missing, empty, or
+malformed config falls back to the default format silently — the hook never disrupts
+the session. Some format ideas: `🦊 {project}: {label}`, `{project} — {label}`.
 
 ## Requirements
 

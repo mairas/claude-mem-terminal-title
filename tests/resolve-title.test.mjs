@@ -3,17 +3,14 @@ import { Database } from "bun:sqlite";
 import {
   resolveTitle,
   renderTitle,
-  emojiForSession,
   titleSequence,
   projectForSession,
   DEFAULT_FORMAT,
-  EMOJI_PALETTE,
 } from "../hooks/resolve-title.mjs";
 
-// The correlation/fallback tests below assert on the label, not the emoji, so
-// they pin an emoji-free format. Emoji and template behaviour have their own
-// tests at the bottom.
-const PLAIN = "[{project}] {label}";
+// The correlation/fallback tests pin the default format explicitly; template
+// behaviour has its own tests at the bottom.
+const PLAIN = DEFAULT_FORMAT;
 
 // Fixture: a subset of claude-mem's schema (verified against v13.4.0) holding
 // only the columns the resolver queries touch. Named-column inserts so a column
@@ -130,56 +127,35 @@ test("projectForSession resolves via content_session_id, falling back to cwd bas
   expect(projectForSession(db, "unknown", "/home/me/code/myrepo/")).toBe("myrepo");
 });
 
-test("resolveTitle uses the default format (emoji prefix) when none is given", () => {
+test("resolveTitle uses the default format when none is given", () => {
   const db = makeDb();
   session(db, "sid-1", "admin");
   prompt(db, "sid-1", 50);
   summary(db, "admin", "do a thing", 100);
-  const out = resolveTitle(db, { sessionId: "sid-1", cwd: "/x" });
-  expect(out).toBe(`${emojiForSession("sid-1")} [admin] do a thing`);
+  expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x" })).toBe("[admin] do a thing");
 });
 
-test("emojiForSession is deterministic, stable, and drawn from the palette", () => {
-  const a = emojiForSession("session-abc");
-  expect(emojiForSession("session-abc")).toBe(a);
-  // A single code point, and non-empty.
-  expect([...a].length).toBe(1);
-  expect(a.length).toBeGreaterThan(0);
+test("renderTitle substitutes {project} and {label}", () => {
+  expect(renderTitle("[{project}] {label}", { project: "p", label: "do x" })).toBe("[p] do x");
 });
 
-test("emojiForSession differs across distinct sessions (no global collapse)", () => {
-  const ids = Array.from({ length: 20 }, (_, i) => `sess-${i}`);
-  const distinct = new Set(ids.map(emojiForSession));
-  expect(distinct.size).toBeGreaterThan(1);
+test("renderTitle keeps a literal emoji in the template", () => {
+  expect(renderTitle("🦊 {project} › {label}", { project: "p", label: "x" })).toBe("🦊 p › x");
 });
 
-test("emojiForSession returns empty string for a missing session id", () => {
-  expect(emojiForSession(null)).toBe("");
-  expect(emojiForSession("")).toBe("");
-});
-
-test("renderTitle substitutes all three tokens", () => {
-  expect(renderTitle("{emoji} [{project}] {label}", { emoji: "🦊", project: "p", label: "do x" })).toBe(
-    "🦊 [p] do x",
-  );
-});
-
-test("renderTitle leaves unknown tokens literal", () => {
-  expect(renderTitle("{project}/{branch}", { emoji: "🦊", project: "p", label: "x" })).toBe(
-    "p/{branch}",
+test("renderTitle leaves unknown tokens (including a stray {emoji}) literal", () => {
+  expect(renderTitle("{emoji} {project}/{branch}", { project: "p", label: "x" })).toBe(
+    "{emoji} p/{branch}",
   );
 });
 
 test("an empty token leaves no gap (collapsed and trimmed)", () => {
-  // No emoji -> the default format must not start with a stray space.
-  expect(renderTitle(DEFAULT_FORMAT, { emoji: "", project: "p", label: "x" })).toBe("[p] x");
+  expect(renderTitle("{project} {label}", { project: "", label: "x" })).toBe("x");
 });
 
 test("renderTitle cleans control chars in dynamic values", () => {
   const messy = "a" + String.fromCharCode(27) + "b" + String.fromCharCode(0x9c) + "c";
-  expect(renderTitle("[{project}] {label}", { emoji: "", project: messy, label: "x" })).toBe(
-    "[a b c] x",
-  );
+  expect(renderTitle("[{project}] {label}", { project: messy, label: "x" })).toBe("[a b c] x");
 });
 
 test("renderTitle cleans control chars in the template itself (no OSC injection)", () => {
@@ -187,24 +163,15 @@ test("renderTitle cleans control chars in the template itself (no OSC injection)
   // break out of the OSC 0 sequence the hook wraps it in.
   const ESC = String.fromCharCode(27);
   const BEL = String.fromCharCode(7);
-  const out = renderTitle(`${BEL}${ESC}]0;PWNED${BEL}[{project}]`, { emoji: "", project: "p", label: "x" });
+  const out = renderTitle(`${BEL}${ESC}]0;PWNED${BEL}[{project}]`, { project: "p", label: "x" });
   expect(out.includes(ESC)).toBe(false);
   expect(out.includes(BEL)).toBe(false);
   // Control chars collapse to spaces, so the payload can't close/reopen OSC.
   expect(out).toBe("]0;PWNED [p]");
 });
 
-test("every palette emoji is a single code point (truncation-safety invariant)", () => {
-  for (const e of EMOJI_PALETTE) expect([...e].length).toBe(1);
-});
-
-test("emojiForSession always returns a palette member", () => {
-  const members = new Set(EMOJI_PALETTE);
-  for (let i = 0; i < 200; i++) expect(members.has(emojiForSession(`sess-${i}`))).toBe(true);
-});
-
-test("truncation keeps an emoji prefix intact and caps at MAX_LEN", () => {
-  const out = renderTitle("{emoji} {label}", { emoji: "🦊", project: "", label: "x".repeat(200) });
+test("truncation keeps a single-codepoint glyph intact and caps at MAX_LEN", () => {
+  const out = renderTitle("🦊 {label}", { project: "", label: "x".repeat(200) });
   expect([...out].length).toBe(100);
   expect(out.startsWith("🦊 ")).toBe(true);
   expect(out.endsWith("…")).toBe(true);

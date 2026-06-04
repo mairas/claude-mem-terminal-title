@@ -3,21 +3,9 @@
 
 const MAX_LEN = 100;
 const DEFAULT_LABEL = "Claude Code";
-export const DEFAULT_FORMAT = "{emoji} [{project}] {label}";
+export const DEFAULT_FORMAT = "[{project}] {label}";
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);
-
-// A window keeps the same emoji for its whole life so it's recognisable at a
-// glance. Every entry is a single code point (no ZWJ, flag, or variation-
-// selector sequences) so codepoint-safe truncation can never split one, and
-// they're visually distinct from each other.
-export const EMOJI_PALETTE = [
-  "🦊", "🐱", "🐶", "🐺", "🦁", "🐯", "🐮", "🐷", "🐸", "🐵",
-  "🐔", "🐧", "🦉", "🦄", "🐙", "🦋", "🐝", "🐞", "🦀", "🐠",
-  "🐬", "🐳", "🐢", "🦎", "🦖", "🦕", "🐌", "🦅", "🦜", "🦩",
-  "🌵", "🌲", "🌻", "🌹", "🍀", "🍄", "🍎", "🍊", "🍋", "🍇",
-  "🍓", "🍒", "🥑", "🌮", "🍕", "🎸", "🎺", "🎯", "🎲", "🚀",
-];
 
 // Replace C0 controls, DEL, and C1 controls (0x80-0x9f) with spaces, then
 // collapse runs. Control chars must never reach the OSC sequence — a stray ESC
@@ -31,30 +19,16 @@ function clean(s) {
   return out.replace(/ +/g, " ").trim();
 }
 
-// Deterministic per-window emoji: FNV-1a over the session id picks a palette
-// entry, so the same window always shows the same emoji. Pseudo-unique, not
-// coordinated — two windows can collide, but rarely with this palette size.
-// No session id yet (cwd-fallback window) → empty string, and {emoji} collapses.
-export function emojiForSession(sessionId) {
-  if (!sessionId) return "";
-  let h = 0x811c9dc5;
-  for (let i = 0; i < sessionId.length; i++) {
-    h ^= sessionId.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return EMOJI_PALETTE[(h >>> 0) % EMOJI_PALETTE.length];
-}
-
-// Substitute {emoji}/{project}/{label} into the template, leaving any unknown
-// {token} literal. The fully assembled title — template literals included — is
-// run through clean(), so a control char in a config template can't break the
-// OSC sequence any more than one in a value can. Truncate by code point so a
-// palette emoji (always a single code point) is never split; arbitrary
-// multi-code-point graphemes in label text can still be cut.
-export function renderTitle(format, { emoji, project, label }) {
-  const values = { emoji: emoji ?? "", project: clean(project), label: clean(label) };
+// Substitute {project}/{label} into the template, leaving any unknown {token}
+// literal — so a literal emoji a user puts in the template is kept verbatim. The
+// fully assembled title (template literals included) is run through clean(), so a
+// control char in a config template can't break the OSC sequence any more than
+// one in a value can. Truncate by code point: a single-code-point glyph is never
+// split, though a multi-code-point grapheme in label text still can be.
+export function renderTitle(format, { project, label }) {
+  const values = { project: clean(project), label: clean(label) };
   const title = clean(
-    (format ?? DEFAULT_FORMAT).replace(/\{(emoji|project|label)\}/g, (_, key) => values[key]),
+    (format ?? DEFAULT_FORMAT).replace(/\{(project|label)\}/g, (_, key) => values[key]),
   );
   const cp = [...title];
   if (cp.length > MAX_LEN) return cp.slice(0, MAX_LEN - 1).join("").trimEnd() + "…";
@@ -117,9 +91,5 @@ export function resolveTitle(db, { sessionId, cwd, format }) {
   const project = projectForSession(db, sessionId, cwd);
   if (!project) return null;
   const request = latestRequestForSession(db, project, sessionId);
-  return renderTitle(format, {
-    emoji: emojiForSession(sessionId),
-    project,
-    label: request || DEFAULT_LABEL,
-  });
+  return renderTitle(format, { project, label: request || DEFAULT_LABEL });
 }
