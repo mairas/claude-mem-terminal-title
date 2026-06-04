@@ -44,10 +44,15 @@ belongs to whichever of the project's windows prompted most recently before it w
 generated. No extra hook or state file — the prompt timeline already lives in the
 database.
 
-The heuristic can still mis-assign if two same-repo windows finish a turn within the
-generation-lag window of each other. The exact fix needs claude-mem to stamp the
-originating session id onto each generated row — see
-[`docs/upstream-issue.md`](docs/upstream-issue.md).
+This is a heuristic with a real failure envelope: claude-mem generates a summary
+asynchronously *after* a turn, so if a second same-project window merely sends a
+prompt while the first window's turn is still being summarised, the summary can be
+attributed to the wrong window — the first window's title goes stale and the second
+shows work it didn't do. The prompt timeline alone can't disambiguate two windows
+with overlapping open turns. The exact fix needs claude-mem to stamp the originating
+session id onto each generated row — see
+[`docs/upstream-issue.md`](docs/upstream-issue.md). Until then, the titles are
+reliable for windows whose turns don't overlap and best-effort when they do.
 
 ## Requirements
 
@@ -63,7 +68,8 @@ originating session id onto each generated row — see
 ```
 
 Restart Claude Code (or start a new session) so the env var takes effect. Remove with
-`./run uninstall`. Run `./run help` for all commands.
+`./run uninstall`. If titles stop updating, `./run doctor` checks the live claude-mem
+DB and reports a schema mismatch. Run `./run help` for all commands.
 
 ## License
 

@@ -31,7 +31,7 @@ function deps {
   #@ Category: Setup
   local ok=0
   local bun_bin
-  bun_bin=$(command -v bun || echo "$HOME/.bun/bin/bun")
+  bun_bin=$(_bun)
   if [[ -x $bun_bin ]]; then
     echo "bun: $("$bun_bin" --version) ($bun_bin)"
   else
@@ -50,6 +50,12 @@ function deps {
     ok=1
   fi
   return $ok
+}
+
+function doctor {
+  #@ Verify the live claude-mem DB is readable and its schema still matches
+  #@ Category: Setup
+  "$(_bun)" "$PROJECT_ROOT/hooks/doctor.mjs"
 }
 
 function install {
