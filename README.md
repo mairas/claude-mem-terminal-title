@@ -25,7 +25,9 @@ A `Stop` hook reads the current task label for the window's project from
 claude-mem's SQLite database and emits an `OSC 0` terminal sequence (via the hook's
 top-level `terminalSequence` output field, Claude Code ≥ 2.1.141) to set the title.
 
-Title format: `[project] task label`.
+Title format: `[project] task label`. When the window has no task label yet (a
+fresh window, or a project with no claude-mem history), it falls back to
+`[project] Claude Code` so the title always at least names the project.
 
 Claude Code animates the terminal title itself, which would overwrite the hook's
 title. The installer sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in `settings.json`

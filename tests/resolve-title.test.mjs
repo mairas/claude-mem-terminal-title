@@ -60,22 +60,34 @@ test("two same-project windows each get their own summary", () => {
   expect(resolveTitle(db, { sessionId: "B", cwd: "/x" })).toBe("[proj] B's work");
 });
 
-test("a window owning no summary yet resolves to null, not another window's", () => {
+test("a window owning no summary yet gets the default, not another window's title", () => {
   const db = makeDb();
   session(db, "A", "proj");
   session(db, "B", "proj");
   prompt(db, "A", 10);
   summary(db, "proj", "A's work", 15);
   prompt(db, "B", 20); // B has prompted but its summary hasn't been generated yet
-  expect(resolveTitle(db, { sessionId: "B", cwd: "/x" })).toBeNull();
+  expect(resolveTitle(db, { sessionId: "B", cwd: "/x" })).toBe("[proj] Claude Code");
   expect(resolveTitle(db, { sessionId: "A", cwd: "/x" })).toBe("[proj] A's work");
 });
 
-test("returns null when the project has no summaries", () => {
+test("falls back to '[project] Claude Code' when the project has no summaries", () => {
   const db = makeDb();
   session(db, "sid-1", "empty");
   prompt(db, "sid-1", 10);
-  expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x" })).toBeNull();
+  expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x" })).toBe("[empty] Claude Code");
+});
+
+test("defaults using the cwd basename when the session is unregistered", () => {
+  const db = makeDb();
+  expect(resolveTitle(db, { sessionId: "ghost", cwd: "/home/me/myrepo" })).toBe(
+    "[myrepo] Claude Code",
+  );
+});
+
+test("returns null only when no project can be determined", () => {
+  const db = makeDb();
+  expect(resolveTitle(db, { sessionId: null, cwd: "" })).toBeNull();
 });
 
 test("ignores null/empty requests", () => {

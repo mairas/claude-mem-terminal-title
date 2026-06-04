@@ -2,6 +2,7 @@
 // Database so it can be unit-tested against an in-memory fixture.
 
 const MAX_LEN = 100;
+const DEFAULT_LABEL = "Claude Code";
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);
 
@@ -73,9 +74,12 @@ export function latestRequestForSession(db, project, sessionId) {
   return row?.request ?? null;
 }
 
+// Falls back to "[project] Claude Code" when the window owns no summary yet (a
+// fresh window, or a project with no claude-mem history). Returns null only when
+// no project can be determined at all.
 export function resolveTitle(db, { sessionId, cwd }) {
   const project = projectForSession(db, sessionId, cwd);
+  if (!project) return null;
   const request = latestRequestForSession(db, project, sessionId);
-  if (!request) return null;
-  return formatTitle(project, request);
+  return formatTitle(project, request || DEFAULT_LABEL);
 }
