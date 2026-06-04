@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -62,6 +62,147 @@ test("malformed stdin never throws (exit 0, output is empty or valid JSON)", asy
     const { out, code } = await runStop("not json at all", { CMTT_DB: dbPath });
     expect(code).toBe(0);
     if (out) expect(() => JSON.parse(out)).not.toThrow();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a config file's format template controls the title", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
+  try {
+    const dbPath = fixtureDb(dir);
+    const cfg = join(dir, "config.json");
+    writeFileSync(cfg, JSON.stringify({ format: "{project} » {label}" }));
+    const { out, code } = await runStop(
+      JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
+      { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(out).terminalSequence).toContain("proj » do a thing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a malformed config file falls back to the default format", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
+  try {
+    const dbPath = fixtureDb(dir);
+    const cfg = join(dir, "config.json");
+    writeFileSync(cfg, "{ not valid json");
+    const { out, code } = await runStop(
+      JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
+      { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
+    );
+    expect(code).toBe(0);
+    // Default format still produces the label, prefixed by the window emoji.
+    expect(JSON.parse(out).terminalSequence).toContain("[proj] do a thing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a non-string format key is ignored (default format)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
+  try {
+    const dbPath = fixtureDb(dir);
+    const cfg = join(dir, "config.json");
+    writeFileSync(cfg, JSON.stringify({ format: 42 }));
+    const { out, code } = await runStop(
+      JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
+      { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(out).terminalSequence).toContain("[proj] do a thing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("config resolves via the default XDG path when CMTT_CONFIG is unset", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
+  try {
+    const dbPath = fixtureDb(dir);
+    const xdg = join(dir, "xdg");
+    mkdirSync(join(xdg, "claude-mem-terminal-title"), { recursive: true });
+    writeFileSync(
+      join(xdg, "claude-mem-terminal-title", "config.json"),
+      JSON.stringify({ format: "{project} :: {label}" }),
+    );
+    const { out, code } = await runStop(
+      JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
+      { CMTT_DB: dbPath, XDG_CONFIG_HOME: xdg, CMTT_CONFIG: "" },
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(out).terminalSequence).toContain("proj :: do a thing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("config with no format key falls back to the default format", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
+  try {
+    const dbPath = fixtureDb(dir);
+    const cfg = join(dir, "config.json");
+    writeFileSync(cfg, JSON.stringify({ other: "x" }));
+    const { out, code } = await runStop(
+      JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
+      { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(out).terminalSequence).toContain("[proj] do a thing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a top-level null config falls back to the default format", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
+  try {
+    const dbPath = fixtureDb(dir);
+    const cfg = join(dir, "config.json");
+    writeFileSync(cfg, "null");
+    const { out, code } = await runStop(
+      JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
+      { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(out).terminalSequence).toContain("[proj] do a thing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an empty/whitespace format is ignored, never emitting a blank title", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
+  try {
+    const dbPath = fixtureDb(dir);
+    const cfg = join(dir, "config.json");
+    writeFileSync(cfg, JSON.stringify({ format: "   " }));
+    const { out, code } = await runStop(
+      JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
+      { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(out).terminalSequence).toContain("[proj] do a thing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CONFIG_PATH pointing at a directory is a silent no-op fallback (exit 0)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmtt-"));
+  try {
+    const dbPath = fixtureDb(dir);
+    const cfgDir = join(dir, "config-as-dir");
+    mkdirSync(cfgDir);
+    const { out, code } = await runStop(
+      JSON.stringify({ session_id: "S", cwd: "/x/proj" }),
+      { CMTT_DB: dbPath, CMTT_CONFIG: cfgDir },
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(out).terminalSequence).toContain("[proj] do a thing");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
