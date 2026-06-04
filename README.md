@@ -75,9 +75,9 @@ format: "🦊 [{project}] {label}"
 | `{label}` | Current task label from claude-mem, or `Claude Code` as fallback |
 
 Unknown `{tokens}` are left as-is. Any other characters — including a leading emoji —
-are kept verbatim, so put one in the template if you want it. A missing, empty, or
-malformed config falls back to the default format silently — the hook never disrupts
-the session. Some format ideas: `🦊 {project}: {label}`, `{project} — {label}`.
+are kept verbatim, so put one in the template if you want it. A missing, empty, comment-only,
+or otherwise unusable config falls back to the default format silently — the hook
+never disrupts the session. Some format ideas: `🦊 {project}: {label}`, `{project} — {label}`.
 
 ## Requirements
 

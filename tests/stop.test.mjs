@@ -97,7 +97,7 @@ test("a malformed config file falls back to the default format", async () => {
       { CMTT_DB: dbPath, CMTT_CONFIG: cfg },
     );
     expect(code).toBe(0);
-    // Default format still produces the label, prefixed by the window emoji.
+    // Malformed config falls back to the default format.
     expect(JSON.parse(out).terminalSequence).toContain("[proj] do a thing");
   } finally {
     rmSync(dir, { recursive: true, force: true });

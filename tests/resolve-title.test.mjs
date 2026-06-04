@@ -178,13 +178,13 @@ test("truncation keeps a single-codepoint glyph intact and caps at MAX_LEN", () 
 });
 
 test("renderTitle caps length with an ellipsis", () => {
-  const out = renderTitle("[{project}] {label}", { emoji: "", project: "p", label: "x".repeat(200) });
+  const out = renderTitle("[{project}] {label}", { project: "p", label: "x".repeat(200) });
   expect([...out].length).toBe(100);
   expect(out.endsWith("…")).toBe(true);
 });
 
 test("renderTitle truncation never splits a surrogate pair", () => {
-  const out = renderTitle("{label}", { emoji: "", project: "", label: "😀".repeat(200) });
+  const out = renderTitle("{label}", { project: "", label: "😀".repeat(200) });
   const lone = [...out].some((ch) => {
     const c = ch.codePointAt(0);
     return c >= 0xd800 && c <= 0xdfff;

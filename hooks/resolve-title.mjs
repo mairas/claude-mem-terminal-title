@@ -19,12 +19,12 @@ function clean(s) {
   return out.replace(/ +/g, " ").trim();
 }
 
-// Substitute {project}/{label} into the template, leaving any unknown {token}
-// literal — so a literal emoji a user puts in the template is kept verbatim. The
-// fully assembled title (template literals included) is run through clean(), so a
-// control char in a config template can't break the OSC sequence any more than
-// one in a value can. Truncate by code point: a single-code-point glyph is never
-// split, though a multi-code-point grapheme in label text still can be.
+// Substitute {project}/{label} into the template; unknown {tokens} and all other
+// literal text are kept verbatim. The fully assembled title (template literals
+// included) is run through clean(), so a control char in a config template can't
+// break the OSC sequence any more than one in a value can. Truncate by code
+// point: a single-code-point glyph is never split, though a multi-code-point
+// grapheme in label text still can be.
 export function renderTitle(format, { project, label }) {
   const values = { project: clean(project), label: clean(label) };
   const title = clean(
