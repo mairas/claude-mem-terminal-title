@@ -32,17 +32,19 @@ title. The installer sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in `settings.js
 to hand title control to the hook. This disables Claude Code's own (animated)
 title, including its auto-generated session title.
 
-### Telling same-repo windows apart (Milestone 2, in progress)
+### Telling same-repo windows apart
 
-Current behaviour picks the latest label for the window's project, so two windows
-on the same repo show the same title. claude-mem keys generated rows by an internal
-`memory_session_id` whose mapping back to a Claude Code session lags, so the project
-is the only reliable key today.
+claude-mem doesn't stamp the originating session onto a summary, and its
+`memory_session_id` mapping back to a Claude Code session lags, so the project alone
+can't distinguish two windows on the same repo. This tool correlates by time using
+claude-mem's `user_prompts` table (a reliable per-window prompt timeline): a summary
+belongs to whichever of the project's windows prompted most recently before it was
+generated. No extra hook or state file — the prompt timeline already lives in the
+database.
 
-Milestone 2 correlates by time: each window claims the project label generated after
-its own most recent turn. That heuristic can still mis-assign if two same-repo
-windows finish a turn within a few seconds of each other. The exact fix needs
-claude-mem to stamp the originating session id onto each generated row — see
+The heuristic can still mis-assign if two same-repo windows finish a turn within the
+generation-lag window of each other. The exact fix needs claude-mem to stamp the
+originating session id onto each generated row — see
 [`docs/upstream-issue.md`](docs/upstream-issue.md).
 
 ## Requirements

@@ -45,19 +45,37 @@ export function projectForSession(db, sessionId, cwd) {
   return null;
 }
 
-export function latestRequest(db, project) {
-  if (!project) return null;
+// claude-mem doesn't stamp the originating session onto a summary, so two windows
+// on one project can't be told apart by a direct key. Correlate by time instead:
+// a summary belongs to whichever of the project's windows prompted most recently
+// before that summary was generated. user_prompts carries a reliable
+// (content_session_id, created_at_epoch) timeline per window.
+export function latestRequestForSession(db, project, sessionId) {
+  if (!project || !sessionId) return null;
   const row = db
     .query(
-      "SELECT request FROM session_summaries WHERE project = ? AND request IS NOT NULL AND request != '' ORDER BY created_at_epoch DESC LIMIT 1",
+      `SELECT s.request
+       FROM session_summaries s
+       WHERE s.project = $project
+         AND s.request IS NOT NULL AND s.request != ''
+         AND (
+           SELECT up.content_session_id
+           FROM user_prompts up
+           JOIN sdk_sessions sk ON sk.content_session_id = up.content_session_id
+           WHERE sk.project = $project AND up.created_at_epoch <= s.created_at_epoch
+           ORDER BY up.created_at_epoch DESC
+           LIMIT 1
+         ) = $session
+       ORDER BY s.created_at_epoch DESC
+       LIMIT 1`,
     )
-    .get(project);
+    .get({ $project: project, $session: sessionId });
   return row?.request ?? null;
 }
 
 export function resolveTitle(db, { sessionId, cwd }) {
   const project = projectForSession(db, sessionId, cwd);
-  const request = latestRequest(db, project);
+  const request = latestRequestForSession(db, project, sessionId);
   if (!request) return null;
   return formatTitle(project, request);
 }

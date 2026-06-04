@@ -15,52 +15,84 @@ function makeDb() {
   db.run(
     "CREATE TABLE session_summaries (memory_session_id TEXT, project TEXT, request TEXT, created_at_epoch INTEGER)",
   );
+  db.run(
+    "CREATE TABLE user_prompts (content_session_id TEXT, prompt_number INTEGER, prompt_text TEXT, created_at_epoch INTEGER)",
+  );
   return db;
 }
 
 const session = (db, id, project) =>
   db.run("INSERT INTO sdk_sessions VALUES (?,?,?)", [id, project, 0]);
+const prompt = (db, sid, t) =>
+  db.run("INSERT INTO user_prompts VALUES (?,?,?,?)", [sid, 1, "p", t]);
 const summary = (db, project, request, t) =>
   db.run("INSERT INTO session_summaries VALUES (?,?,?,?)", ["m", project, request, t]);
 
-test("resolves the project via content_session_id, not cwd", () => {
+test("resolves the latest summary owned by the session's window", () => {
   const db = makeDb();
   session(db, "sid-1", "admin");
+  prompt(db, "sid-1", 50);
   summary(db, "admin", "Design the thing", 100);
-  const title = resolveTitle(db, { sessionId: "sid-1", cwd: "/somewhere/else" });
-  expect(title).toBe("[admin] Design the thing");
+  expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/elsewhere" })).toBe(
+    "[admin] Design the thing",
+  );
 });
 
-test("picks the newest summary by created_at_epoch", () => {
+test("picks the newest owned summary by created_at_epoch", () => {
   const db = makeDb();
   session(db, "sid-1", "admin");
+  prompt(db, "sid-1", 50);
+  prompt(db, "sid-1", 150);
   summary(db, "admin", "old cleanup task", 100);
   summary(db, "admin", "the real work", 200);
   expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x" })).toBe("[admin] the real work");
 });
 
-test("falls back to cwd basename when the session is not yet registered", () => {
+test("two same-project windows each get their own summary", () => {
   const db = makeDb();
-  summary(db, "myrepo", "doing stuff", 100);
-  expect(projectForSession(db, "unknown-sid", "/home/me/code/myrepo/")).toBe("myrepo");
-  expect(resolveTitle(db, { sessionId: "unknown-sid", cwd: "/home/me/code/myrepo" })).toBe(
-    "[myrepo] doing stuff",
-  );
+  session(db, "A", "proj");
+  session(db, "B", "proj");
+  prompt(db, "A", 10);
+  summary(db, "proj", "A's work", 15);
+  prompt(db, "B", 20);
+  summary(db, "proj", "B's work", 25);
+  expect(resolveTitle(db, { sessionId: "A", cwd: "/x" })).toBe("[proj] A's work");
+  expect(resolveTitle(db, { sessionId: "B", cwd: "/x" })).toBe("[proj] B's work");
+});
+
+test("a window owning no summary yet resolves to null, not another window's", () => {
+  const db = makeDb();
+  session(db, "A", "proj");
+  session(db, "B", "proj");
+  prompt(db, "A", 10);
+  summary(db, "proj", "A's work", 15);
+  prompt(db, "B", 20); // B has prompted but its summary hasn't been generated yet
+  expect(resolveTitle(db, { sessionId: "B", cwd: "/x" })).toBeNull();
+  expect(resolveTitle(db, { sessionId: "A", cwd: "/x" })).toBe("[proj] A's work");
 });
 
 test("returns null when the project has no summaries", () => {
   const db = makeDb();
   session(db, "sid-1", "empty");
+  prompt(db, "sid-1", 10);
   expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x" })).toBeNull();
 });
 
 test("ignores null/empty requests", () => {
   const db = makeDb();
   session(db, "sid-1", "admin");
+  prompt(db, "sid-1", 50);
   summary(db, "admin", "real label", 100);
   summary(db, "admin", "", 200);
   summary(db, "admin", null, 300);
   expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x" })).toBe("[admin] real label");
+});
+
+test("projectForSession resolves via content_session_id, falling back to cwd basename", () => {
+  const db = makeDb();
+  session(db, "sid-1", "admin");
+  expect(projectForSession(db, "sid-1", "/whatever")).toBe("admin");
+  expect(projectForSession(db, "unknown", "/home/me/code/myrepo/")).toBe("myrepo");
 });
 
 test("formatTitle strips control chars and collapses whitespace", () => {
