@@ -21,37 +21,55 @@ session and generates a rolling, Haiku-summarised task label (the `request` fiel
 in its `session_summaries` table), updated roughly every turn. This tool reuses
 that label as the window title — no extra model calls.
 
-Two hooks do the work:
+A `Stop` hook reads the current task label for the window's project from
+claude-mem's SQLite database and emits an `OSC 0` terminal sequence (via the hook's
+top-level `terminalSequence` output field, Claude Code ≥ 2.1.141) to set the title.
 
-- `UserPromptSubmit` records this window's session id and the time of its latest
-  prompt to a small state file.
-- `Stop` reads the current task label for the window's project from claude-mem's
-  SQLite database and emits an `OSC 2` terminal sequence (via the hook
-  `terminalSequence` field, Claude Code ≥ 2.1.141) to set the title.
+Title format: `[project] task label`. When the window has no task label yet (a
+fresh window, or a project with no claude-mem history), it falls back to
+`[project] Claude Code` so the title always at least names the project.
 
-Title format: `[project] task label`.
+Claude Code animates the terminal title itself, which would overwrite the hook's
+title. The installer sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in `settings.json`
+to hand title control to the hook. This disables Claude Code's own (animated)
+title, including its auto-generated session title.
 
 ### Telling same-repo windows apart
 
-claude-mem keys generated rows by an internal `memory_session_id`, and the mapping
-back to a Claude Code session lags, so "latest label for this project" alone can't
-distinguish two windows on the same repo. This tool correlates by time: each window
-claims the project label generated after its own most recent turn.
+claude-mem doesn't stamp the originating session onto a summary, and its
+`memory_session_id` mapping back to a Claude Code session lags, so the project alone
+can't distinguish two windows on the same repo. This tool correlates by time using
+claude-mem's `user_prompts` table (a reliable per-window prompt timeline): a summary
+belongs to whichever of the project's windows prompted most recently before it was
+generated. No extra hook or state file — the prompt timeline already lives in the
+database.
 
-That heuristic can mis-assign if two same-repo windows finish a turn within a few
-seconds of each other. The exact fix needs claude-mem to stamp the originating
-session id onto each generated row — see [`docs/upstream-issue.md`](docs/upstream-issue.md).
+This is a heuristic with a real failure envelope: claude-mem generates a summary
+asynchronously *after* a turn, so if a second same-project window merely sends a
+prompt while the first window's turn is still being summarised, the summary can be
+attributed to the wrong window — the first window's title goes stale and the second
+shows work it didn't do. The prompt timeline alone can't disambiguate two windows
+with overlapping open turns. The exact fix needs claude-mem to stamp the originating
+session id onto each generated row — see
+[`docs/upstream-issue.md`](docs/upstream-issue.md). Until then, the titles are
+reliable for windows whose turns don't overlap and best-effort when they do.
 
 ## Requirements
 
 - Claude Code ≥ 2.1.141 (for hook `terminalSequence`)
 - claude-mem installed and generating memory
 - [bun](https://bun.sh) (used by claude-mem already; provides in-process SQLite)
-- A terminal that honours `OSC 0/2` window-title sequences
+- A terminal that honours `OSC 0` window-title sequences
 
 ## Install
 
-Coming with Milestone 1. Run `./run help` to see available commands.
+```sh
+./run install     # adds the Stop hook + CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 to settings.json
+```
+
+Restart Claude Code (or start a new session) so the env var takes effect. Remove with
+`./run uninstall`. If titles stop updating, `./run doctor` checks the live claude-mem
+DB and reports a schema mismatch. Run `./run help` for all commands.
 
 ## License
 
