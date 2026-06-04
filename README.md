@@ -22,10 +22,11 @@ A `Stop` hook reads the current task label for the window's project from
 claude-mem's SQLite database and emits an `OSC 0` terminal sequence (via the hook's
 top-level `terminalSequence` output field, Claude Code ≥ 2.1.141) to set the title.
 
-Default title format: `{emoji} [project] task label`. When the window has no task
-label yet (a fresh window, or a project with no claude-mem history), the label
-falls back to `Claude Code` so the title always at least names the project. The
-format is configurable — see [Configuration](#configuration).
+Default title format: `{emoji} [{project}] {label}`, where `{label}` is the
+current task. When the window has no task label yet (a fresh window, or a project
+with no claude-mem history), `{label}` falls back to `Claude Code` so the title
+always at least names the project. The format is configurable — see
+[Configuration](#configuration).
 
 The leading emoji is unique-ish per window and stays fixed for that window's whole
 life, so you can recognise a window at a glance instead of reading the text. It's

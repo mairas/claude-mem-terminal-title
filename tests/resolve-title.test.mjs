@@ -7,6 +7,7 @@ import {
   titleSequence,
   projectForSession,
   DEFAULT_FORMAT,
+  EMOJI_PALETTE,
 } from "../hooks/resolve-title.mjs";
 
 // The correlation/fallback tests below assert on the label, not the emoji, so
@@ -174,11 +175,39 @@ test("an empty token leaves no gap (collapsed and trimmed)", () => {
   expect(renderTitle(DEFAULT_FORMAT, { emoji: "", project: "p", label: "x" })).toBe("[p] x");
 });
 
-test("renderTitle cleans control chars in dynamic values, not the template", () => {
+test("renderTitle cleans control chars in dynamic values", () => {
   const messy = "a" + String.fromCharCode(27) + "b" + String.fromCharCode(0x9c) + "c";
   expect(renderTitle("[{project}] {label}", { emoji: "", project: messy, label: "x" })).toBe(
     "[a b c] x",
   );
+});
+
+test("renderTitle cleans control chars in the template itself (no OSC injection)", () => {
+  // A config template carrying raw BEL/ESC must not survive into the title and
+  // break out of the OSC 0 sequence the hook wraps it in.
+  const ESC = String.fromCharCode(27);
+  const BEL = String.fromCharCode(7);
+  const out = renderTitle(`${BEL}${ESC}]0;PWNED${BEL}[{project}]`, { emoji: "", project: "p", label: "x" });
+  expect(out.includes(ESC)).toBe(false);
+  expect(out.includes(BEL)).toBe(false);
+  // Control chars collapse to spaces, so the payload can't close/reopen OSC.
+  expect(out).toBe("]0;PWNED [p]");
+});
+
+test("every palette emoji is a single code point (truncation-safety invariant)", () => {
+  for (const e of EMOJI_PALETTE) expect([...e].length).toBe(1);
+});
+
+test("emojiForSession always returns a palette member", () => {
+  const members = new Set(EMOJI_PALETTE);
+  for (let i = 0; i < 200; i++) expect(members.has(emojiForSession(`sess-${i}`))).toBe(true);
+});
+
+test("truncation keeps an emoji prefix intact and caps at MAX_LEN", () => {
+  const out = renderTitle("{emoji} {label}", { emoji: "🦊", project: "", label: "x".repeat(200) });
+  expect([...out].length).toBe(100);
+  expect(out.startsWith("🦊 ")).toBe(true);
+  expect(out.endsWith("…")).toBe(true);
 });
 
 test("renderTitle caps length with an ellipsis", () => {

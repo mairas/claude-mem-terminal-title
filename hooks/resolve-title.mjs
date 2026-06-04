@@ -11,7 +11,7 @@ const BEL = String.fromCharCode(7);
 // glance. Every entry is a single code point (no ZWJ, flag, or variation-
 // selector sequences) so codepoint-safe truncation can never split one, and
 // they're visually distinct from each other.
-const EMOJI_PALETTE = [
+export const EMOJI_PALETTE = [
   "🦊", "🐱", "🐶", "🐺", "🦁", "🐯", "🐮", "🐷", "🐸", "🐵",
   "🐔", "🐧", "🦉", "🦄", "🐙", "🦋", "🐝", "🐞", "🦀", "🐠",
   "🐬", "🐳", "🐢", "🦎", "🦖", "🦕", "🐌", "🦅", "🦜", "🦩",
@@ -46,15 +46,16 @@ export function emojiForSession(sessionId) {
 }
 
 // Substitute {emoji}/{project}/{label} into the template, leaving any unknown
-// {token} literal. Only the dynamic values are control-char cleaned — the
-// template and palette emoji are trusted. Collapse spaces (so an empty token
-// leaves no gap) and truncate by code point so an emoji is never split.
+// {token} literal. The fully assembled title — template literals included — is
+// run through clean(), so a control char in a config template can't break the
+// OSC sequence any more than one in a value can. Truncate by code point so a
+// palette emoji (always a single code point) is never split; arbitrary
+// multi-code-point graphemes in label text can still be cut.
 export function renderTitle(format, { emoji, project, label }) {
   const values = { emoji: emoji ?? "", project: clean(project), label: clean(label) };
-  const title = (format ?? DEFAULT_FORMAT)
-    .replace(/\{(emoji|project|label)\}/g, (_, key) => values[key])
-    .replace(/ +/g, " ")
-    .trim();
+  const title = clean(
+    (format ?? DEFAULT_FORMAT).replace(/\{(emoji|project|label)\}/g, (_, key) => values[key]),
+  );
   const cp = [...title];
   if (cp.length > MAX_LEN) return cp.slice(0, MAX_LEN - 1).join("").trimEnd() + "…";
   return title;

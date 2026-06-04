@@ -28,12 +28,14 @@ const CONFIG_PATH =
 
 // Returns the user's `format` template, or undefined to let resolveTitle use its
 // default. A missing or malformed file is not an error — like everything else in
-// this hook, it degrades silently to the default.
+// this hook, it degrades silently to the default. An empty or whitespace-only
+// format is treated as absent so it can't render a blank title (which the emit
+// guard would drop, leaving the window's previous title stale).
 function loadFormat() {
   try {
     if (!existsSync(CONFIG_PATH)) return undefined;
     const cfg = JSON.parse(readFileSync(CONFIG_PATH, "utf8") || "{}");
-    return typeof cfg.format === "string" ? cfg.format : undefined;
+    return typeof cfg.format === "string" && cfg.format.trim() ? cfg.format : undefined;
   } catch {
     return undefined;
   }
