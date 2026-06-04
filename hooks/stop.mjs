@@ -4,7 +4,7 @@
 // the window title. Never throws into the session: any failure is a silent
 // no-op.
 
-import { existsSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveTitle, titleSequence } from "./resolve-title.mjs";
@@ -15,6 +15,29 @@ process.on("unhandledRejection", () => process.exit(0));
 
 const DB_PATH =
   process.env.CMTT_DB || join(homedir(), ".claude-mem", "claude-mem.db");
+
+// XDG-style config home, overridable wholesale with CMTT_CONFIG (a full file
+// path) for testing or non-standard layouts.
+const CONFIG_PATH =
+  process.env.CMTT_CONFIG ||
+  join(
+    process.env.XDG_CONFIG_HOME || join(homedir(), ".config"),
+    "claude-mem-terminal-title",
+    "config.json",
+  );
+
+// Returns the user's `format` template, or undefined to let resolveTitle use its
+// default. A missing or malformed file is not an error — like everything else in
+// this hook, it degrades silently to the default.
+function loadFormat() {
+  try {
+    if (!existsSync(CONFIG_PATH)) return undefined;
+    const cfg = JSON.parse(readFileSync(CONFIG_PATH, "utf8") || "{}");
+    return typeof cfg.format === "string" ? cfg.format : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // Set CMTT_DEBUG=1 to log payloads and emitted sequences to
 // ~/.claude-mem-terminal-title.log.
@@ -51,7 +74,7 @@ try {
     const db = new Database(DB_PATH, { readonly: true });
     let title;
     try {
-      title = resolveTitle(db, { sessionId, cwd });
+      title = resolveTitle(db, { sessionId, cwd, format: loadFormat() });
     } finally {
       db.close();
     }

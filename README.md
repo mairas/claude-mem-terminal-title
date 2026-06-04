@@ -4,9 +4,6 @@ Keep each Claude Code terminal window's title tracking the topic you're actually
 working on — even after `/clear`, and even when several windows sit on the same
 repo.
 
-> Status: scaffolding. The hooks are not implemented yet; work is tracked in the
-> repository issues (Milestones 1 and 2).
-
 ## The problem
 
 Claude Code sets the terminal title once, early in a session. When you pivot to a
@@ -25,9 +22,16 @@ A `Stop` hook reads the current task label for the window's project from
 claude-mem's SQLite database and emits an `OSC 0` terminal sequence (via the hook's
 top-level `terminalSequence` output field, Claude Code ≥ 2.1.141) to set the title.
 
-Title format: `[project] task label`. When the window has no task label yet (a
-fresh window, or a project with no claude-mem history), it falls back to
-`[project] Claude Code` so the title always at least names the project.
+Default title format: `{emoji} [project] task label`. When the window has no task
+label yet (a fresh window, or a project with no claude-mem history), the label
+falls back to `Claude Code` so the title always at least names the project. The
+format is configurable — see [Configuration](#configuration).
+
+The leading emoji is unique-ish per window and stays fixed for that window's whole
+life, so you can recognise a window at a glance instead of reading the text. It's
+derived from the session id, so two windows usually differ but aren't guaranteed
+to (true uniqueness would need shared state). Drop the `{emoji}` token from your
+format to turn it off.
 
 Claude Code animates the terminal title itself, which would overwrite the hook's
 title. The installer sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in `settings.json`
@@ -57,6 +61,31 @@ of guessing by time — tracked in
 [#5](https://github.com/mairas/claude-mem-terminal-title/issues/5). Until then, the
 titles are reliable for windows whose turns don't overlap and best-effort when they
 do.
+
+## Configuration
+
+Optional. Without a config file the default format applies. To customise, create:
+
+```
+~/.config/claude-mem-terminal-title/config.json
+```
+
+(honours `$XDG_CONFIG_HOME`; override the whole path with `CMTT_CONFIG`)
+
+```json
+{ "format": "{emoji} [{project}] {label}" }
+```
+
+| Token | Meaning |
+|-------|---------|
+| `{emoji}` | The window's fixed emoji (empty until the session is registered) |
+| `{project}` | Project name (git root or cwd basename) |
+| `{label}` | Current task label from claude-mem, or `Claude Code` as fallback |
+
+Unknown `{tokens}` are left as-is. A missing or malformed config file falls back to
+the default format silently — the hook never disrupts the session. Some format
+ideas: `{emoji} {project}: {label}`, `{project} — {label}` (no emoji),
+`{emoji} {label}`.
 
 ## Requirements
 
