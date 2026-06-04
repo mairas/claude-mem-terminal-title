@@ -4,11 +4,14 @@
 // the window title. Never throws into the session: any failure is a silent
 // no-op.
 
-import { Database } from "bun:sqlite";
 import { existsSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveTitle, titleSequence } from "./resolve-title.mjs";
+
+// The hook must never disrupt the session. Guard the async paths so any
+// unhandled rejection still exits cleanly rather than non-zero.
+process.on("unhandledRejection", () => process.exit(0));
 
 const DB_PATH =
   process.env.CMTT_DB || join(homedir(), ".claude-mem", "claude-mem.db");
@@ -42,9 +45,16 @@ try {
   const cwd = input.cwd ?? process.cwd();
 
   if (existsSync(DB_PATH)) {
+    // Imported here, not at module top, so a missing bun:sqlite builtin is
+    // caught and no-ops instead of failing module load with a non-zero exit.
+    const { Database } = await import("bun:sqlite");
     const db = new Database(DB_PATH, { readonly: true });
-    const title = resolveTitle(db, { sessionId, cwd });
-    db.close();
+    let title;
+    try {
+      title = resolveTitle(db, { sessionId, cwd });
+    } finally {
+      db.close();
+    }
     debug("SESSION", String(sessionId), "CWD", String(cwd), "TITLE", JSON.stringify(title));
     if (title) {
       const out = JSON.stringify({ terminalSequence: titleSequence(title) });
