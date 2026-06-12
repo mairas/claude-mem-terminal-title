@@ -56,11 +56,21 @@ export function projectForSession(db, sessionId, cwd) {
   return null;
 }
 
-// claude-mem doesn't stamp the originating session onto a summary, so two windows
-// on one project can't be told apart by a direct key. Correlate by time instead:
-// a summary belongs to whichever of the project's windows prompted most recently
-// before that summary was generated. user_prompts carries a reliable
-// (content_session_id, created_at_epoch) timeline per window.
+// claude-mem stamps each summary with the memory_session_id of the generation
+// run that wrote it, and sdk_sessions maps the window's content_session_id to
+// its *current* memory_session_id. That mapping rotates between generation runs
+// without cascading to old rows, so only recent summaries resolve through it;
+// older ones are orphaned (their memory id is on no session row).
+//
+// Attribution, latest match wins:
+//   1. A summary stamped with this window's current memory id is this window's.
+//   2. A summary stamped with another window's current memory id is never ours.
+//   3. An orphaned summary is correlated by time, but only via a matching
+//      prompt ordinal: it belongs to the window whose prompt with the summary's
+//      own prompt_number most recently preceded it. An orphan without a
+//      prompt_number anchors nothing and is never attributed. The anchor keeps
+//      a window that merely prompts during another window's generation lag
+//      from stealing the summary.
 export function latestRequestForSession(db, project, sessionId) {
   if (!project || !sessionId) return null;
   const row = db
@@ -70,13 +80,23 @@ export function latestRequestForSession(db, project, sessionId) {
        WHERE s.project = $project
          AND s.request IS NOT NULL AND s.request != ''
          AND (
-           SELECT up.content_session_id
-           FROM user_prompts up
-           JOIN sdk_sessions sk ON sk.content_session_id = up.content_session_id
-           WHERE sk.project = $project AND up.created_at_epoch <= s.created_at_epoch
-           ORDER BY up.created_at_epoch DESC, (up.content_session_id = $session) DESC, up.rowid DESC
-           LIMIT 1
-         ) = $session
+           s.memory_session_id = (SELECT memory_session_id FROM sdk_sessions
+                                  WHERE content_session_id = $session LIMIT 1)
+           OR (
+             NOT EXISTS (SELECT 1 FROM sdk_sessions own
+                         WHERE own.memory_session_id = s.memory_session_id)
+             AND (
+               SELECT up.content_session_id
+               FROM user_prompts up
+               JOIN sdk_sessions sk ON sk.content_session_id = up.content_session_id
+               WHERE sk.project = $project
+                 AND up.created_at_epoch <= s.created_at_epoch
+                 AND up.prompt_number = s.prompt_number
+               ORDER BY up.created_at_epoch DESC, (up.content_session_id = $session) DESC, up.rowid DESC
+               LIMIT 1
+             ) = $session
+           )
+         )
        ORDER BY s.created_at_epoch DESC
        LIMIT 1`,
     )
@@ -84,12 +104,23 @@ export function latestRequestForSession(db, project, sessionId) {
   return row?.request ?? null;
 }
 
-// Falls back to the default label when the window owns no summary yet (a fresh
-// window, or a project with no claude-mem history). Returns null only when no
-// project can be determined at all. `format` defaults to DEFAULT_FORMAT.
+// The session's opening prompt — a usable task label for a window that owns no
+// summary yet (claude-mem fills summaries in with generation lag).
+export function firstPromptForSession(db, sessionId) {
+  if (!sessionId) return null;
+  const row = db
+    .query("SELECT user_prompt FROM sdk_sessions WHERE content_session_id = ? LIMIT 1")
+    .get(sessionId);
+  return row?.user_prompt || null;
+}
+
+// Label preference: attributable summary, then the window's own first prompt,
+// then the default. Returns null only when no project can be determined at all.
+// `format` defaults to DEFAULT_FORMAT.
 export function resolveTitle(db, { sessionId, cwd, format }) {
   const project = projectForSession(db, sessionId, cwd);
   if (!project) return null;
   const request = latestRequestForSession(db, project, sessionId);
-  return renderTitle(format, { project, label: request || DEFAULT_LABEL });
+  const label = request || firstPromptForSession(db, sessionId) || DEFAULT_LABEL;
+  return renderTitle(format, { project, label });
 }
