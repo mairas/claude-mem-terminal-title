@@ -79,7 +79,7 @@ export function latestRequestForSession(db, project, sessionId) {
          AND s.request IS NOT NULL AND s.request != ''
          AND (
            s.memory_session_id = (SELECT memory_session_id FROM sdk_sessions
-                                  WHERE content_session_id = $session)
+                                  WHERE content_session_id = $session LIMIT 1)
            OR (
              NOT EXISTS (SELECT 1 FROM sdk_sessions own
                          WHERE own.memory_session_id = s.memory_session_id)
