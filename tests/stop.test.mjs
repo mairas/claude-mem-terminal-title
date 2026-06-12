@@ -9,12 +9,12 @@ const STOP = new URL("../hooks/stop.mjs", import.meta.url).pathname;
 function fixtureDb(dir) {
   const path = join(dir, "claude-mem.db");
   const db = new Database(path);
-  db.run("CREATE TABLE sdk_sessions (id INTEGER PRIMARY KEY, content_session_id TEXT, project TEXT, started_at_epoch INTEGER)");
-  db.run("CREATE TABLE session_summaries (id INTEGER PRIMARY KEY, memory_session_id TEXT, project TEXT, request TEXT, created_at_epoch INTEGER)");
+  db.run("CREATE TABLE sdk_sessions (id INTEGER PRIMARY KEY, content_session_id TEXT, memory_session_id TEXT, project TEXT, user_prompt TEXT, started_at_epoch INTEGER)");
+  db.run("CREATE TABLE session_summaries (id INTEGER PRIMARY KEY, memory_session_id TEXT, project TEXT, request TEXT, prompt_number INTEGER, created_at_epoch INTEGER)");
   db.run("CREATE TABLE user_prompts (id INTEGER PRIMARY KEY, content_session_id TEXT, prompt_number INTEGER, prompt_text TEXT, created_at_epoch INTEGER)");
-  db.run("INSERT INTO sdk_sessions (content_session_id, project, started_at_epoch) VALUES ('S','proj',0)");
+  db.run("INSERT INTO sdk_sessions (content_session_id, memory_session_id, project, started_at_epoch) VALUES ('S','m','proj',0)");
   db.run("INSERT INTO user_prompts (content_session_id, prompt_number, prompt_text, created_at_epoch) VALUES ('S',1,'p',10)");
-  db.run("INSERT INTO session_summaries (memory_session_id, project, request, created_at_epoch) VALUES ('m','proj','do a thing',20)");
+  db.run("INSERT INTO session_summaries (memory_session_id, project, request, prompt_number, created_at_epoch) VALUES ('m','proj','do a thing',1,20)");
   db.close();
   return path;
 }

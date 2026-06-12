@@ -23,9 +23,9 @@ claude-mem's SQLite database and emits an `OSC 0` terminal sequence (via the hoo
 top-level `terminalSequence` output field, Claude Code ≥ 2.1.141) to set the title.
 
 Default title format: `[{project}] {label}`, where `{label}` is the current task.
-When the window has no task label yet (a fresh window, or a project with no
-claude-mem history), `{label}` falls back to `Claude Code` so the title always at
-least names the project. The format is configurable — see
+When the window has no task label yet, `{label}` falls back to the session's
+opening prompt, and to `Claude Code` when claude-mem hasn't registered the session
+at all, so the title always at least names the project. The format is configurable — see
 [Configuration](#configuration). Want a leading emoji to spot the window at a
 glance? Put one in the template yourself, e.g. `🦊 [{project}] {label}`.
 
@@ -36,27 +36,26 @@ title, including its auto-generated session title.
 
 ### Telling same-repo windows apart
 
-claude-mem doesn't stamp the originating session onto a summary, and its
-`memory_session_id` mapping back to a Claude Code session lags, so the project alone
-can't distinguish two windows on the same repo. This tool correlates by time using
-claude-mem's `user_prompts` table (a reliable per-window prompt timeline): a summary
-belongs to whichever of the project's windows prompted most recently before it was
-generated. No extra hook or state file — the prompt timeline already lives in the
-database.
+claude-mem ([#2770](https://github.com/thedotmack/claude-mem/pull/2770), released)
+stamps each summary with the `memory_session_id` of the generation run that wrote
+it, and `sdk_sessions` maps a window's `content_session_id` to its *current*
+`memory_session_id`. That mapping rotates between generation runs without updating
+older rows, so only a window's most recent summaries resolve through it; older
+summaries are orphaned — their memory id is on no session row.
 
-This is a heuristic with a real failure envelope: claude-mem generates a summary
-asynchronously *after* a turn, so if a second same-project window merely sends a
-prompt while the first window's turn is still being summarised, the summary can be
-attributed to the wrong window — the first window's title goes stale and the second
-shows work it didn't do. The prompt timeline alone can't disambiguate two windows
-with overlapping open turns. The exact fix needs claude-mem to stamp the originating
-session id onto each generated row, which shipped upstream in
-[claude-mem #2770](https://github.com/thedotmack/claude-mem/pull/2770). Once a
-released claude-mem carries it, this tool can correlate on that id directly instead
-of guessing by time — tracked in
-[#5](https://github.com/mairas/claude-mem-terminal-title/issues/5). Until then, the
-titles are reliable for windows whose turns don't overlap and best-effort when they
-do.
+The resolver attributes summaries in this order, latest match winning:
+
+1. A summary stamped with this window's current memory id belongs to this window.
+2. A summary stamped with *another* window's current memory id is never shown here.
+3. An orphaned summary is correlated by time using claude-mem's `user_prompts`
+   table, anchored on the summary's `prompt_number`: it belongs to the window whose
+   prompt with that ordinal most recently preceded it. The anchor keeps a window
+   that merely prompts during another window's generation lag from stealing the
+   summary.
+
+The orphan path is still a heuristic: two same-project windows sitting at the same
+prompt ordinal with overlapping turns can mis-attribute. That envelope is far
+narrower than pure time correlation, and rules 1–2 make recent summaries exact.
 
 ## Configuration
 
