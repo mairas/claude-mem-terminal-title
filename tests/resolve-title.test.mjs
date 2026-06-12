@@ -43,7 +43,7 @@ test("resolves the latest summary owned by the session's window", () => {
   const db = makeDb();
   session(db, "sid-1", "admin");
   prompt(db, "sid-1", 50);
-  summary(db, "admin", "Design the thing", 100);
+  summary(db, "admin", "Design the thing", 100, { promptNumber: 1 });
   expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/elsewhere", format: PLAIN })).toBe(
     "[admin] Design the thing",
   );
@@ -52,10 +52,10 @@ test("resolves the latest summary owned by the session's window", () => {
 test("picks the newest owned summary by created_at_epoch", () => {
   const db = makeDb();
   session(db, "sid-1", "admin");
-  prompt(db, "sid-1", 50);
-  prompt(db, "sid-1", 150);
-  summary(db, "admin", "old cleanup task", 100);
-  summary(db, "admin", "the real work", 200);
+  prompt(db, "sid-1", 50, 1);
+  prompt(db, "sid-1", 150, 2);
+  summary(db, "admin", "old cleanup task", 100, { promptNumber: 1 });
+  summary(db, "admin", "the real work", 200, { promptNumber: 2 });
   expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x", format: PLAIN })).toBe("[admin] the real work");
 });
 
@@ -64,9 +64,9 @@ test("two same-project windows each get their own summary", () => {
   session(db, "A", "proj");
   session(db, "B", "proj");
   prompt(db, "A", 10);
-  summary(db, "proj", "A's work", 15);
+  summary(db, "proj", "A's work", 15, { promptNumber: 1 });
   prompt(db, "B", 20);
-  summary(db, "proj", "B's work", 25);
+  summary(db, "proj", "B's work", 25, { promptNumber: 1 });
   expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] A's work");
   expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).toBe("[proj] B's work");
 });
@@ -77,7 +77,7 @@ test("equal-epoch prompts: each window deterministically claims the tie", () => 
   session(db, "B", "proj");
   prompt(db, "A", 100);
   prompt(db, "B", 100);
-  summary(db, "proj", "S", 110);
+  summary(db, "proj", "S", 110, { promptNumber: 1 });
   // Tiebreaker prefers the querying session, so neither is silently dropped.
   expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] S");
   expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).toBe("[proj] S");
@@ -148,6 +148,19 @@ test("an orphaned summary whose prompt_number matches no prompt is not attribute
   expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
 });
 
+test("an orphaned summary without a prompt_number is shown to no window", () => {
+  const db = makeDb();
+  session(db, "A", "proj", { memoryId: "mem-A2" });
+  session(db, "B", "proj", { memoryId: "mem-B2" });
+  prompt(db, "A", 10);
+  prompt(db, "B", 20);
+  // No prompt ordinal means no anchor: pure time correlation would hand this
+  // orphan to B, but an unanchored orphan is unownable.
+  summary(db, "proj", "unanchored work", 30, { memoryId: "mem-gone", promptNumber: null });
+  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
+  expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
+});
+
 test("an attributable summary still wins over the first-prompt fallback", () => {
   const db = makeDb();
   session(db, "A", "proj", { memoryId: "mem-A", firstPrompt: "Fix the flux capacitor" });
@@ -163,7 +176,7 @@ test("a window owning no summary yet gets the default, not another window's titl
   session(db, "A", "proj");
   session(db, "B", "proj");
   prompt(db, "A", 10);
-  summary(db, "proj", "A's work", 15);
+  summary(db, "proj", "A's work", 15, { promptNumber: 1 });
   prompt(db, "B", 20);
   expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
   expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] A's work");
@@ -192,9 +205,9 @@ test("ignores null/empty requests", () => {
   const db = makeDb();
   session(db, "sid-1", "admin");
   prompt(db, "sid-1", 50);
-  summary(db, "admin", "real label", 100);
-  summary(db, "admin", "", 200);
-  summary(db, "admin", null, 300);
+  summary(db, "admin", "real label", 100, { promptNumber: 1 });
+  summary(db, "admin", "", 200, { promptNumber: 1 });
+  summary(db, "admin", null, 300, { promptNumber: 1 });
   expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x", format: PLAIN })).toBe("[admin] real label");
 });
 
@@ -209,7 +222,7 @@ test("resolveTitle uses the default format when none is given", () => {
   const db = makeDb();
   session(db, "sid-1", "admin");
   prompt(db, "sid-1", 50);
-  summary(db, "admin", "do a thing", 100);
+  summary(db, "admin", "do a thing", 100, { promptNumber: 1 });
   expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x" })).toBe("[admin] do a thing");
 });
 

@@ -65,10 +65,12 @@ export function projectForSession(db, sessionId, cwd) {
 // Attribution, latest match wins:
 //   1. A summary stamped with this window's current memory id is this window's.
 //   2. A summary stamped with another window's current memory id is never ours.
-//   3. An orphaned summary is correlated by time, anchored on prompt_number:
-//      it belongs to the window whose prompt with the summary's own ordinal
-//      most recently preceded it. The anchor keeps a window that merely prompts
-//      during another window's generation lag from stealing the summary.
+//   3. An orphaned summary is correlated by time, but only via a matching
+//      prompt ordinal: it belongs to the window whose prompt with the summary's
+//      own prompt_number most recently preceded it. An orphan without a
+//      prompt_number anchors nothing and is never attributed. The anchor keeps
+//      a window that merely prompts during another window's generation lag
+//      from stealing the summary.
 export function latestRequestForSession(db, project, sessionId) {
   if (!project || !sessionId) return null;
   const row = db
@@ -89,7 +91,7 @@ export function latestRequestForSession(db, project, sessionId) {
                JOIN sdk_sessions sk ON sk.content_session_id = up.content_session_id
                WHERE sk.project = $project
                  AND up.created_at_epoch <= s.created_at_epoch
-                 AND (s.prompt_number IS NULL OR up.prompt_number = s.prompt_number)
+                 AND up.prompt_number = s.prompt_number
                ORDER BY up.created_at_epoch DESC, (up.content_session_id = $session) DESC, up.rowid DESC
                LIMIT 1
              ) = $session
