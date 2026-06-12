@@ -132,6 +132,22 @@ test("falls back to the session's first prompt when no summary is attributable",
   );
 });
 
+test("an empty-string opening prompt falls through to the default label", () => {
+  const db = makeDb();
+  session(db, "A", "proj", { memoryId: "mem-A", firstPrompt: "" });
+  prompt(db, "A", 10);
+  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
+});
+
+test("an orphaned summary whose prompt_number matches no prompt is not attributed", () => {
+  const db = makeDb();
+  session(db, "A", "proj", { memoryId: "mem-A2" });
+  prompt(db, "A", 10, 1);
+  // The orphan's anchor (prompt 7) exists in no window, so nobody may claim it.
+  summary(db, "proj", "stray work", 50, { memoryId: "mem-gone", promptNumber: 7 });
+  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
+});
+
 test("an attributable summary still wins over the first-prompt fallback", () => {
   const db = makeDb();
   session(db, "A", "proj", { memoryId: "mem-A", firstPrompt: "Fix the flux capacitor" });
