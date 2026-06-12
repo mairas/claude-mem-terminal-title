@@ -71,7 +71,7 @@ format: "🦊 [{project}] {label}"
 | Token | Meaning |
 |-------|---------|
 | `{project}` | Project name (git root or cwd basename) |
-| `{label}` | Current task label from claude-mem, or `Claude Code` as fallback |
+| `{label}` | Current task label from claude-mem, falling back to the session's opening prompt, then `Claude Code` |
 
 Unknown `{tokens}` are left as-is. Any other characters — including a leading emoji —
 are kept verbatim, so put one in the template if you want it. A missing, empty, comment-only,
