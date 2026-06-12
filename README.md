@@ -48,10 +48,11 @@ The resolver attributes summaries in this order, latest match winning:
 1. A summary stamped with this window's current memory id belongs to this window.
 2. A summary stamped with *another* window's current memory id is never shown here.
 3. An orphaned summary is correlated by time using claude-mem's `user_prompts`
-   table, anchored on the summary's `prompt_number`: it belongs to the window whose
-   prompt with that ordinal most recently preceded it. The anchor keeps a window
-   that merely prompts during another window's generation lag from stealing the
-   summary.
+   table, but only via a matching prompt ordinal: it belongs to the window whose
+   prompt with the summary's `prompt_number` most recently preceded it. An orphaned
+   summary without a `prompt_number` is shown nowhere — the window falls back to
+   its opening prompt. The anchor keeps a window that merely prompts during another
+   window's generation lag from stealing the summary.
 
 The orphan path is still a heuristic: two same-project windows sitting at the same
 prompt ordinal with overlapping turns can mis-attribute. That envelope is far
@@ -81,7 +82,10 @@ never disrupts the session. Some format ideas: `🦊 {project}: {label}`, `{proj
 ## Requirements
 
 - Claude Code ≥ 2.1.141 (for hook `terminalSequence`)
-- claude-mem installed and generating memory
+- claude-mem at a release carrying
+  [#2770](https://github.com/thedotmack/claude-mem/pull/2770) (`memory_session_id`
+  stamping; verified against v13.5.6). On older schemas the hook leaves the title
+  unchanged — `./run doctor` diagnoses this.
 - [bun](https://bun.sh) (used by claude-mem already; provides in-process SQLite)
 - A terminal that honours `OSC 0` window-title sequences
 
