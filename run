@@ -27,7 +27,7 @@ function _bun {
 # Setup Commands
 
 function deps {
-  #@ Check that required tooling is available
+  #@ Install dependencies and check required tooling
   #@ Category: Setup
   local ok=0
   local bun_bin
@@ -36,24 +36,21 @@ function deps {
     echo "bun: $("$bun_bin" --version) ($bun_bin)"
   else
     echo "bun: MISSING (install from https://bun.sh)"
-    ok=1
+    return 1
   fi
+  echo "installing dependencies..."
+  "$bun_bin" install
   if command -v claude >/dev/null 2>&1; then
-    echo "claude: $(claude --version 2>/dev/null || echo present)"
+    echo "claude: $(claude --version 2>/dev/null || echo present) (Claude Code >= 2.1.141; also the summarizer's subscription auth)"
   else
-    echo "claude: not found on PATH (Claude Code >= 2.1.141 required for terminalSequence)"
-  fi
-  if [[ -f "$HOME/.claude-mem/claude-mem.db" ]]; then
-    echo "claude-mem db: $HOME/.claude-mem/claude-mem.db"
-  else
-    echo "claude-mem db: NOT FOUND at ~/.claude-mem/claude-mem.db (is claude-mem installed?)"
+    echo "claude: NOT FOUND on PATH (required for terminalSequence and for the summarizer's auth)"
     ok=1
   fi
   return $ok
 }
 
 function doctor {
-  #@ Verify the live claude-mem DB is readable and its schema still matches
+  #@ Verify the claude CLI, the Agent SDK, and a live topic generation
   #@ Category: Setup
   "$(_bun)" "$PROJECT_ROOT/hooks/doctor.mjs"
 }
