@@ -13,91 +13,90 @@ one becomes guesswork.
 
 ## The approach
 
-[claude-mem](https://github.com/thedotmack/claude-mem) already watches each
-session and generates a rolling, Haiku-summarised task label (the `request` field
-in its `session_summaries` table), updated roughly every turn. This tool reuses
-that label as the window title — no extra model calls.
+A `Stop` hook names each window after the current topic of its session. The topic
+comes from a short LLM summary of your recent prompts, generated on the fly — the
+tool has no external dependency on claude-mem (or anything else that has to be
+running).
 
-A `Stop` hook reads the current task label for the window's project from
-claude-mem's SQLite database and emits an `OSC 0` terminal sequence (via the hook's
-top-level `terminalSequence` output field, Claude Code ≥ 2.1.141) to set the title.
+The hook sets the title in two stages so it's both instant and accurate:
 
-Default title format: `[{project}] {label}`, where `{label}` is the current task.
-When the window has no task label yet, `{label}` falls back to the session's
-opening prompt, and to `Claude Code` when claude-mem hasn't registered the session
-at all, so the title always at least names the project. The format is configurable — see
-[Configuration](#configuration). Want a leading emoji to spot the window at a
-glance? Put one in the template yourself, e.g. `🦊 [{project}] {label}`.
+1. **Synchronously**, it emits a placeholder via Claude Code's `terminalSequence`
+   output — the topic it generated last (cached), or, before there is one, your
+   latest typed prompt. No waiting.
+2. **Asynchronously**, when the conversation has moved on since the cached topic,
+   it spawns a detached process that summarizes your recent prompts into a 3–6
+   word topic and writes the title straight to the window's terminal — out of
+   band, a few seconds later. The result is cached so the next turn shows it
+   instantly.
 
-Claude Code animates the terminal title itself, which would overwrite the hook's
-title. The installer sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in `settings.json`
-to hand title control to the hook. This disables Claude Code's own (animated)
-title, including its auto-generated session title.
+Because the slow LLM call is detached, it never blocks the session, and there is
+no per-turn latency.
+
+Default title format: `[{project}] {label}`, where `{project}` is the git-root
+basename of the working directory and `{label}` is the generated topic. The format
+is configurable — see [Configuration](#configuration). Want a leading emoji to spot
+the window at a glance? Put one in the template, e.g. `🦊 [{project}] {label}`.
+
+Claude Code animates the terminal title itself, which would fight the hook. The
+installer sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in `settings.json` to hand
+title control to the hook.
+
+### Authentication — no API key
+
+The summarizer runs through the [Claude Agent
+SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) in **isolation
+mode** (`settingSources: []`): it reuses your existing Claude Code subscription
+login, so there is no API key to manage and no separate per-token billing. Each
+topic is one short Claude Haiku call. Isolation mode also means the spawned
+`claude` loads none of your user settings — so it can't recurse into this hook,
+and it leaves no trace in other tools.
 
 ### Telling same-repo windows apart
 
-claude-mem ([#2770](https://github.com/thedotmack/claude-mem/pull/2770), released)
-stamps each summary with the `memory_session_id` of the generation run that wrote
-it, and `sdk_sessions` maps a window's `content_session_id` to its *current*
-`memory_session_id`. That mapping rotates between generation runs without updating
-older rows, so only a window's most recent summaries resolve through it; older
-summaries are orphaned — their memory id is on no session row.
-
-The resolver attributes summaries in this order, latest match winning:
-
-1. A summary stamped with this window's current memory id belongs to this window.
-2. A summary stamped with *another* window's current memory id is never shown here.
-3. An orphaned summary is correlated by time using claude-mem's `user_prompts`
-   table, but only via a matching prompt ordinal: it belongs to the window whose
-   prompt with the summary's `prompt_number` most recently preceded it. An orphaned
-   summary without a `prompt_number` is shown nowhere — the window falls back to
-   its opening prompt. The anchor keeps a window that merely prompts during another
-   window's generation lag from stealing the summary.
-
-The orphan path is still a heuristic: two same-project windows sitting at the same
-prompt ordinal with overlapping turns can mis-attribute. That envelope is far
-narrower than pure time correlation, and rules 1–2 make recent summaries exact.
+The detached updater writes the title directly to the window's terminal device. It
+finds that device by walking its own process tree up to the `claude` process that
+owns the window's pty — so with several windows open on the same repo, each
+update lands on the right one. The generated topic is cached per session id.
 
 ## Configuration
 
-Optional. Without a config file the default format applies. To customise, create
+Optional. Without a config file the defaults apply. To customise, create
 `~/.config/claude-mem-terminal-title.yaml` (honours `$XDG_CONFIG_HOME`; override the
 whole path with `CMTT_CONFIG`):
 
 ```yaml
 # Title template. Tokens: {project} {label}. Add a literal emoji if you like.
 format: "🦊 [{project}] {label}"
+# Summarizer model (any Claude model id or alias). Default: claude-haiku-4-5-20251001.
+model: "claude-haiku-4-5-20251001"
 ```
 
-| Token | Meaning |
-|-------|---------|
-| `{project}` | Project name (git root or cwd basename) |
-| `{label}` | Current task label from claude-mem, falling back to the session's opening prompt, then `Claude Code` |
+| Key | Meaning |
+|-----|---------|
+| `format` | Title template. Tokens: `{project}` (git-root basename of the cwd), `{label}` (generated topic). Unknown `{tokens}` and other text are kept verbatim. |
+| `model` | Model used to summarize recent prompts into a topic. Haiku is the cheap, fast default. |
 
-Unknown `{tokens}` are left as-is. Any other characters — including a leading emoji —
-are kept verbatim, so put one in the template if you want it. A missing, empty, comment-only,
-or otherwise unusable config falls back to the default format silently — the hook
-never disrupts the session. Some format ideas: `🦊 {project}: {label}`, `{project} — {label}`.
+A missing, empty, comment-only, or otherwise unusable config falls back to the
+defaults silently — the hook never disrupts the session.
 
 ## Requirements
 
-- Claude Code ≥ 2.1.141 (for hook `terminalSequence`)
-- claude-mem at a release carrying
-  [#2770](https://github.com/thedotmack/claude-mem/pull/2770) (`memory_session_id`
-  stamping; verified against v13.5.6). On older schemas the hook leaves the title
-  unchanged — `./run doctor` diagnoses this.
-- [bun](https://bun.sh) (used by claude-mem already; provides in-process SQLite)
+- Claude Code ≥ 2.1.141 (for hook `terminalSequence`), logged in (the summarizer
+  reuses this login — no API key needed)
+- [bun](https://bun.sh)
+- `@anthropic-ai/claude-agent-sdk` (installed by `./run deps`)
 - A terminal that honours `OSC 0` window-title sequences
 
 ## Install
 
 ```sh
+./run deps        # bun install + tooling check
 ./run install     # adds the Stop hook + CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 to settings.json
 ```
 
 Restart Claude Code (or start a new session) so the env var takes effect. Remove with
-`./run uninstall`. If titles stop updating, `./run doctor` checks the live claude-mem
-DB and reports a schema mismatch. Run `./run help` for all commands.
+`./run uninstall`. `./run doctor` verifies the `claude` CLI, the Agent SDK, and a live
+topic generation. Run `./run help` for all commands.
 
 ## License
 

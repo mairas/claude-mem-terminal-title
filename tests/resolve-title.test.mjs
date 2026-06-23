@@ -1,233 +1,126 @@
 import { test, expect } from "bun:test";
-import { Database } from "bun:sqlite";
 import {
-  resolveTitle,
   renderTitle,
   titleSequence,
-  projectForSession,
-  DEFAULT_FORMAT,
+  latestPromptFromTranscript,
+  recentPromptsFromTranscript,
+  contextKey,
+  shouldRegenerate,
 } from "../hooks/resolve-title.mjs";
 
-// The correlation/fallback tests pin the default format explicitly; template
-// behaviour has its own tests at the bottom.
-const PLAIN = DEFAULT_FORMAT;
+// A transcript line in Claude Code's JSONL format.
+const tline = (obj) => JSON.stringify(obj);
+const typedPrompt = (content, promptSource = "typed") =>
+  tline({ type: "user", promptSource, message: { role: "user", content } });
 
-// Fixture: a subset of claude-mem's schema (verified against v13.5.6) holding
-// only the columns the resolver queries touch. Named-column inserts so a column
-// reordering upstream wouldn't silently pass. `./run doctor` checks the real DB.
-function makeDb() {
-  const db = new Database(":memory:");
-  db.run(
-    "CREATE TABLE sdk_sessions (id INTEGER PRIMARY KEY, content_session_id TEXT, memory_session_id TEXT, project TEXT, user_prompt TEXT, started_at_epoch INTEGER)",
-  );
-  db.run(
-    "CREATE TABLE session_summaries (id INTEGER PRIMARY KEY, memory_session_id TEXT, project TEXT, request TEXT, prompt_number INTEGER, created_at_epoch INTEGER)",
-  );
-  db.run(
-    "CREATE TABLE user_prompts (id INTEGER PRIMARY KEY, content_session_id TEXT, prompt_number INTEGER, prompt_text TEXT, created_at_epoch INTEGER)",
-  );
-  return db;
-}
+// --- latestPromptFromTranscript -------------------------------------------
 
-const session = (db, id, project, { memoryId = null, firstPrompt = null } = {}) =>
-  db.run(
-    "INSERT INTO sdk_sessions (content_session_id, memory_session_id, project, user_prompt, started_at_epoch) VALUES (?,?,?,?,?)",
-    [id, memoryId, project, firstPrompt, 0],
-  );
-const prompt = (db, sid, t, promptNumber = 1) =>
-  db.run("INSERT INTO user_prompts (content_session_id, prompt_number, prompt_text, created_at_epoch) VALUES (?,?,?,?)", [sid, promptNumber, "p", t]);
-const summary = (db, project, request, t, { memoryId = "m", promptNumber = null } = {}) =>
-  db.run("INSERT INTO session_summaries (memory_session_id, project, request, prompt_number, created_at_epoch) VALUES (?,?,?,?,?)", [memoryId, project, request, promptNumber, t]);
-
-test("resolves the latest summary owned by the session's window", () => {
-  const db = makeDb();
-  session(db, "sid-1", "admin");
-  prompt(db, "sid-1", 50);
-  summary(db, "admin", "Design the thing", 100, { promptNumber: 1 });
-  expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/elsewhere", format: PLAIN })).toBe(
-    "[admin] Design the thing",
-  );
+test("latestPromptFromTranscript returns the newest typed human prompt", () => {
+  const text = [typedPrompt("the first thing"), typedPrompt("the current thing")].join("\n");
+  expect(latestPromptFromTranscript(text)).toBe("the current thing");
 });
 
-test("picks the newest owned summary by created_at_epoch", () => {
-  const db = makeDb();
-  session(db, "sid-1", "admin");
-  prompt(db, "sid-1", 50, 1);
-  prompt(db, "sid-1", 150, 2);
-  summary(db, "admin", "old cleanup task", 100, { promptNumber: 1 });
-  summary(db, "admin", "the real work", 200, { promptNumber: 2 });
-  expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x", format: PLAIN })).toBe("[admin] the real work");
+test("latestPromptFromTranscript accepts a queued human prompt", () => {
+  expect(latestPromptFromTranscript(typedPrompt("queued topic", "queued"))).toBe("queued topic");
 });
 
-test("two same-project windows each get their own summary", () => {
-  const db = makeDb();
-  session(db, "A", "proj");
-  session(db, "B", "proj");
-  prompt(db, "A", 10);
-  summary(db, "proj", "A's work", 15, { promptNumber: 1 });
-  prompt(db, "B", 20);
-  summary(db, "proj", "B's work", 25, { promptNumber: 1 });
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] A's work");
-  expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).toBe("[proj] B's work");
+test("latestPromptFromTranscript skips slash commands and injected notifications", () => {
+  const text = [
+    typedPrompt("the real prompt"),
+    tline({ type: "user", promptSource: "system", message: { role: "user", content: "/effort ultracode" } }),
+    tline({ type: "user", origin: { kind: "task-notification" }, message: { role: "user", content: "task done" } }),
+  ].join("\n");
+  expect(latestPromptFromTranscript(text)).toBe("the real prompt");
 });
 
-test("equal-epoch prompts: each window deterministically claims the tie", () => {
-  const db = makeDb();
-  session(db, "A", "proj");
-  session(db, "B", "proj");
-  prompt(db, "A", 100);
-  prompt(db, "B", 100);
-  summary(db, "proj", "S", 110, { promptNumber: 1 });
-  // Tiebreaker prefers the querying session, so neither is silently dropped.
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] S");
-  expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).toBe("[proj] S");
+test("latestPromptFromTranscript skips a newer typed record with array content and keeps scanning", () => {
+  // A typed record whose content is an array (e.g. an image/paste attachment) is
+  // not a usable label; the walk must fall through to the older string prompt.
+  const text = [
+    typedPrompt("older good prompt"),
+    tline({ type: "user", promptSource: "typed", message: { role: "user", content: [{ type: "text", text: "newer but array" }] } }),
+  ].join("\n");
+  expect(latestPromptFromTranscript(text)).toBe("older good prompt");
 });
 
-test("a summary stamped with the session's current memory id wins over prompt timing", () => {
-  const db = makeDb();
-  session(db, "A", "proj", { memoryId: "mem-A" });
-  session(db, "B", "proj", { memoryId: "mem-B" });
-  prompt(db, "A", 10);
-  // B prompts after A, just before A's summary lands: the old time heuristic
-  // would hand A's summary to B.
-  prompt(db, "B", 20);
-  summary(db, "proj", "A's work", 30, { memoryId: "mem-A", promptNumber: 1 });
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] A's work");
-  expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).not.toBe("[proj] A's work");
+test("latestPromptFromTranscript ignores a truncated final line", () => {
+  const text = [
+    typedPrompt("good prompt"),
+    '{"type":"user","promptSource":"typed","message":{"role":"user","content":"trun', // partial write
+  ].join("\n");
+  expect(latestPromptFromTranscript(text)).toBe("good prompt");
 });
 
-test("a summary owned by another live session is never shown to a different window", () => {
-  const db = makeDb();
-  session(db, "A", "proj", { memoryId: "mem-A" });
-  session(db, "B", "proj", { memoryId: "mem-B" });
-  // Only A ever prompted before the summary, so time correlation points at A —
-  // but the summary is stamped as B's, which is authoritative.
-  prompt(db, "A", 10);
-  summary(db, "proj", "B's work", 20, { memoryId: "mem-B", promptNumber: 1 });
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
-  expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).toBe("[proj] B's work");
+test("latestPromptFromTranscript returns null when no usable prompt exists", () => {
+  expect(latestPromptFromTranscript("")).toBeNull();
+  expect(latestPromptFromTranscript(undefined)).toBeNull();
+  expect(latestPromptFromTranscript(typedPrompt("   "))).toBeNull();
+  expect(latestPromptFromTranscript(tline({ type: "assistant", message: { content: "hi" } }))).toBeNull();
 });
 
-test("an orphaned summary is attributed via matching prompt_number", () => {
-  const db = makeDb();
-  // claude-mem rotated both windows' memory ids, orphaning the summary: its
-  // memory id is on no session row. A is on prompt 2, B on prompt 1. B prompted
-  // most recently before the summary, but the summary's prompt_number says 2.
-  session(db, "A", "proj", { memoryId: "mem-A2" });
-  session(db, "B", "proj", { memoryId: "mem-B1" });
-  prompt(db, "A", 10, 1);
-  prompt(db, "A", 30, 2);
-  prompt(db, "B", 40, 1);
-  summary(db, "proj", "A's second task", 50, { memoryId: "mem-A1", promptNumber: 2 });
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] A's second task");
-  expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).not.toBe("[proj] A's second task");
+// --- recentPromptsFromTranscript ------------------------------------------
+
+test("recentPromptsFromTranscript returns the recent typed prompts oldest-first", () => {
+  const text = [typedPrompt("one"), typedPrompt("two"), typedPrompt("three")].join("\n");
+  expect(recentPromptsFromTranscript(text)).toEqual(["one", "two", "three"]);
 });
 
-test("falls back to the session's first prompt when no summary is attributable", () => {
-  const db = makeDb();
-  session(db, "A", "proj", { memoryId: "mem-A", firstPrompt: "Fix the flux capacitor" });
-  prompt(db, "A", 10);
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe(
-    "[proj] Fix the flux capacitor",
-  );
+test("recentPromptsFromTranscript respects the limit, keeping the newest", () => {
+  const text = ["a", "b", "c", "d"].map((p) => typedPrompt(p)).join("\n");
+  expect(recentPromptsFromTranscript(text, 2)).toEqual(["c", "d"]);
 });
 
-test("an empty-string opening prompt falls through to the default label", () => {
-  const db = makeDb();
-  session(db, "A", "proj", { memoryId: "mem-A", firstPrompt: "" });
-  prompt(db, "A", 10);
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
+test("recentPromptsFromTranscript excludes non-typed and array-content records", () => {
+  const text = [
+    typedPrompt("real one"),
+    tline({ type: "user", promptSource: "system", message: { role: "user", content: "/clear" } }),
+    tline({ type: "user", promptSource: "typed", message: { role: "user", content: [{ type: "tool_result" }] } }),
+    typedPrompt("real two", "queued"),
+  ].join("\n");
+  expect(recentPromptsFromTranscript(text)).toEqual(["real one", "real two"]);
 });
 
-test("an orphaned summary whose prompt_number matches no prompt is not attributed", () => {
-  const db = makeDb();
-  session(db, "A", "proj", { memoryId: "mem-A2" });
-  prompt(db, "A", 10, 1);
-  // The orphan's anchor (prompt 7) exists in no window, so nobody may claim it.
-  summary(db, "proj", "stray work", 50, { memoryId: "mem-gone", promptNumber: 7 });
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
+test("recentPromptsFromTranscript returns [] when there are no prompts", () => {
+  expect(recentPromptsFromTranscript("")).toEqual([]);
+  expect(recentPromptsFromTranscript(undefined)).toEqual([]);
 });
 
-test("an orphaned summary without a prompt_number is shown to no window", () => {
-  const db = makeDb();
-  session(db, "A", "proj", { memoryId: "mem-A2" });
-  session(db, "B", "proj", { memoryId: "mem-B2" });
-  prompt(db, "A", 10);
-  prompt(db, "B", 20);
-  // No prompt ordinal means no anchor: pure time correlation would hand this
-  // orphan to B, but an unanchored orphan is unownable.
-  summary(db, "proj", "unanchored work", 30, { memoryId: "mem-gone", promptNumber: null });
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
-  expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
+// --- contextKey -----------------------------------------------------------
+
+test("contextKey is stable for the same prompts and differs when they change", () => {
+  expect(contextKey(["a", "b"])).toBe(contextKey(["a", "b"]));
+  expect(contextKey(["a", "b"])).not.toBe(contextKey(["a", "b", "c"]));
+  expect(contextKey(["a", "b"])).not.toBe(contextKey(["a", "x"]));
 });
 
-test("an attributable summary still wins over the first-prompt fallback", () => {
-  const db = makeDb();
-  session(db, "A", "proj", { memoryId: "mem-A", firstPrompt: "Fix the flux capacitor" });
-  prompt(db, "A", 10);
-  summary(db, "proj", "Replace the plutonium", 20, { memoryId: "mem-A", promptNumber: 1 });
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe(
-    "[proj] Replace the plutonium",
-  );
+test("contextKey handles empty input", () => {
+  expect(typeof contextKey([])).toBe("string");
+  expect(contextKey([])).toBe(contextKey(undefined));
 });
 
-test("a window owning no summary yet gets the default, not another window's title", () => {
-  const db = makeDb();
-  session(db, "A", "proj");
-  session(db, "B", "proj");
-  prompt(db, "A", 10);
-  summary(db, "proj", "A's work", 15, { promptNumber: 1 });
-  prompt(db, "B", 20);
-  expect(resolveTitle(db, { sessionId: "B", cwd: "/x", format: PLAIN })).toBe("[proj] Claude Code");
-  expect(resolveTitle(db, { sessionId: "A", cwd: "/x", format: PLAIN })).toBe("[proj] A's work");
+// --- shouldRegenerate ------------------------------------------------------
+
+test("shouldRegenerate: true when there are prompts and the key differs from cache", () => {
+  expect(shouldRegenerate({ prompts: ["a"], key: "k1", cached: null })).toBe(true);
+  expect(shouldRegenerate({ prompts: ["a"], key: "k1", cached: { key: "k0", topic: "t" } })).toBe(true);
 });
 
-test("falls back to '[project] Claude Code' when the project has no summaries", () => {
-  const db = makeDb();
-  session(db, "sid-1", "empty");
-  prompt(db, "sid-1", 10);
-  expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x", format: PLAIN })).toBe("[empty] Claude Code");
+test("shouldRegenerate: false when the cached key matches (debounce)", () => {
+  expect(shouldRegenerate({ prompts: ["a"], key: "k1", cached: { key: "k1", topic: "t" } })).toBe(false);
 });
 
-test("defaults using the cwd basename when the session is unregistered", () => {
-  const db = makeDb();
-  expect(resolveTitle(db, { sessionId: "ghost", cwd: "/home/me/myrepo", format: PLAIN })).toBe(
-    "[myrepo] Claude Code",
-  );
+test("shouldRegenerate: false when there are no prompts", () => {
+  expect(shouldRegenerate({ prompts: [], key: "k1", cached: null })).toBe(false);
 });
 
-test("returns null only when no project can be determined", () => {
-  const db = makeDb();
-  expect(resolveTitle(db, { sessionId: null, cwd: "", format: PLAIN })).toBeNull();
-});
-
-test("ignores null/empty requests", () => {
-  const db = makeDb();
-  session(db, "sid-1", "admin");
-  prompt(db, "sid-1", 50);
-  summary(db, "admin", "real label", 100, { promptNumber: 1 });
-  summary(db, "admin", "", 200, { promptNumber: 1 });
-  summary(db, "admin", null, 300, { promptNumber: 1 });
-  expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x", format: PLAIN })).toBe("[admin] real label");
-});
-
-test("projectForSession resolves via content_session_id, falling back to cwd basename", () => {
-  const db = makeDb();
-  session(db, "sid-1", "admin");
-  expect(projectForSession(db, "sid-1", "/whatever")).toBe("admin");
-  expect(projectForSession(db, "unknown", "/home/me/code/myrepo/")).toBe("myrepo");
-});
-
-test("resolveTitle uses the default format when none is given", () => {
-  const db = makeDb();
-  session(db, "sid-1", "admin");
-  prompt(db, "sid-1", 50);
-  summary(db, "admin", "do a thing", 100, { promptNumber: 1 });
-  expect(resolveTitle(db, { sessionId: "sid-1", cwd: "/x" })).toBe("[admin] do a thing");
-});
+// --- renderTitle / titleSequence ------------------------------------------
 
 test("renderTitle substitutes {project} and {label}", () => {
   expect(renderTitle("[{project}] {label}", { project: "p", label: "do x" })).toBe("[p] do x");
+});
+
+test("renderTitle uses the default format when none is given", () => {
+  expect(renderTitle(undefined, { project: "admin", label: "do a thing" })).toBe("[admin] do a thing");
 });
 
 test("renderTitle keeps a literal emoji in the template", () => {
@@ -250,14 +143,11 @@ test("renderTitle cleans control chars in dynamic values", () => {
 });
 
 test("renderTitle cleans control chars in the template itself (no OSC injection)", () => {
-  // A config template carrying raw BEL/ESC must not survive into the title and
-  // break out of the OSC 0 sequence the hook wraps it in.
   const ESC = String.fromCharCode(27);
   const BEL = String.fromCharCode(7);
   const out = renderTitle(`${BEL}${ESC}]0;PWNED${BEL}[{project}]`, { project: "p", label: "x" });
   expect(out.includes(ESC)).toBe(false);
   expect(out.includes(BEL)).toBe(false);
-  // Control chars collapse to spaces, so the payload can't close/reopen OSC.
   expect(out).toBe("]0;PWNED [p]");
 });
 
@@ -265,12 +155,6 @@ test("truncation keeps a single-codepoint glyph intact and caps at MAX_LEN", () 
   const out = renderTitle("🦊 {label}", { project: "", label: "x".repeat(200) });
   expect([...out].length).toBe(100);
   expect(out.startsWith("🦊 ")).toBe(true);
-  expect(out.endsWith("…")).toBe(true);
-});
-
-test("renderTitle caps length with an ellipsis", () => {
-  const out = renderTitle("[{project}] {label}", { project: "p", label: "x".repeat(200) });
-  expect([...out].length).toBe(100);
   expect(out.endsWith("…")).toBe(true);
 });
 

@@ -4,5 +4,8 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "Set each Claude Code window's terminal title from claude-mem's current task label"
+  "description": "Set each Claude Code window's terminal title from an LLM-generated topic for the current session",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.141"
+  }
 }

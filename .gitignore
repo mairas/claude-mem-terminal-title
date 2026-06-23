@@ -1,5 +1,6 @@
 .DS_Store
 *.log
+node_modules/
 
 # Per-session hook state, if written under the repo during development
 state/
